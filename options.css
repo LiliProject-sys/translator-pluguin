@@ -1,0 +1,183 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: #1f2937;
+  background: #f4f6f8;
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.settings-shell {
+  width: min(680px, calc(100% - 32px));
+  margin: 36px auto;
+}
+
+.settings-header {
+  margin-bottom: 24px;
+}
+
+.product-name {
+  margin: 0 0 6px;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+h1,
+h2,
+p {
+  overflow-wrap: anywhere;
+}
+
+h1 {
+  margin: 0;
+  color: #111827;
+  font-size: 28px;
+  line-height: 1.25;
+}
+
+h2 {
+  margin: 0 0 18px;
+  color: #111827;
+  font-size: 18px;
+}
+
+.settings-summary {
+  margin: 10px 0 0;
+  color: #64748b;
+}
+
+.settings-section,
+.security-note {
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  padding: 24px;
+  background: #ffffff;
+}
+
+.provider-section {
+  margin-top: 16px;
+}
+
+.provider-description {
+  margin: 0 0 16px;
+  color: #64748b;
+}
+
+.security-note {
+  margin-top: 16px;
+  padding-block: 18px;
+}
+
+.security-note h2 {
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+
+.security-note p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.field-label {
+  display: block;
+  margin: 16px 0 6px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+select,
+input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #111827;
+  background: #ffffff;
+  font: inherit;
+}
+
+select:focus,
+input:focus,
+button:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.field-hint {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.configuration-status,
+.operation-status {
+  min-height: 22px;
+  margin-top: 16px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.configuration-status.is-configured,
+.operation-status.is-success {
+  color: #166534;
+}
+
+.configuration-status.is-warning,
+.operation-status.is-error {
+  color: #b42318;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+button {
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #1f2937;
+  background: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.primary-button {
+  border-color: #2563eb;
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.danger-button {
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+@media (max-width: 520px) {
+  .settings-shell {
+    width: calc(100% - 20px);
+    margin: 16px auto;
+  }
+
+  .settings-section,
+  .security-note {
+    padding: 18px;
+  }
+}

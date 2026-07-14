@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Translator-plugin",
+  "description": "使用百度快速翻译、DeepSeek 或 Gemini AI 语境解析查看划选文本，并保存英文词语及上下文。",
+  "version": "0.4.0",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "tabs",
+    "activeTab"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "host_permissions": [
+    "https://fanyi-api.baidu.com/*",
+    "https://api.deepseek.com/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Translator-plugin",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}

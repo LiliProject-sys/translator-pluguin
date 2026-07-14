@@ -1,0 +1,13 @@
+# Local delivery documents and render QA artifacts
+*.docx
+docx_render_check/
+stage*_docx_render_check/
+*_render_check/
+
+# Local editor and operating-system files
+.agents/
+.codex/
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
