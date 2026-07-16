@@ -1,0 +1,127 @@
+Translator-plugin Stage12 开发报告
+生成日期：2026-07-14
+项目版本：0.7.0
+Skill 版本：context-analysis-v4
+
+一、本阶段目标
+
+Stage12 将 AI 词汇分析定位进一步收敛为“科研论文语境词汇分析助手”。目标不是提供普通词典释义、语法教学或同义词列表，而是帮助科研阅读者理解目标词在当前句子中的具体意义、词本身的语义特点，以及作者为什么选择该词表达当前关系。
+
+本阶段保持 Quick/Detail 两层交互。Quick 层继续提供紧凑词汇信息；Detail 层聚焦语境含义和选词原因，仅在替换词会明显改变语义关系时补充一个相关表达的比较。
+
+二、修改文件
+
+1. ai-context-skill.js
+   - Skill 版本由 context-analysis-v3 升级为 context-analysis-v4。
+   - 更新角色指令、Quick/Detail Schema 和本地结果校验。
+   - 删除 confusableWord，新增严格的 comparison 对象或 null。
+
+2. gemini-context-provider.js、deepseek-context-provider.js
+   - 同步新字段、JSON 示例和自然语言约束。
+   - 保持 API 请求、鉴权、超时、缓存、取消、重试和错误映射不变。
+
+3. content.js
+   - Quick 层改读 ipa、commonMeaning、academicMeaning。
+   - Detail 层显示 contextualMeaning 和 wordChoiceReason。
+   - comparison 非空时显示一个“近义词区别”区域；为 null 时不显示该行。
+
+4. options.js
+   - Provider 连接测试摘要改读 academicMeaning 或 contextualMeaning。
+
+5. manifest.json、README.md
+   - 插件版本升级为 0.7.0。
+   - 文档更新为 Stage12 字段契约、设计原则和人工验收项。
+
+6. tests
+   - 新增 stage12-skill-optimization.test.js。
+   - 更新受字段契约变化影响的 Stage6 至 Stage10 测试夹具和版本断言。
+
+三、Skill 变化
+
+Quick 层固定返回：
+
+{
+  word,
+  lemma,
+  ipa,
+  partOfSpeech,
+  commonMeaning,
+  academicMeaning
+}
+
+partOfSpeech 必须根据目标词在当前句子中的实际功能判断，不能只根据词形判断。例如 reinforcing effect 中 reinforcing 应按修饰 effect 的功能判断为 adj.。
+
+Detail 层固定返回：
+
+{
+  contextualMeaning,
+  wordChoiceReason,
+  comparison
+}
+
+wordChoiceReason 要按照“词本身的语义特点 -> 当前句子需要表达的关系 -> 为什么选择该词”组织，禁止只说“更加正式”“更加严谨”或“更适合学术论文”。
+
+四、Schema 变化
+
+Quick 与 Detail 顶层对象均保持 additionalProperties: false。
+
+comparison 字段必须存在，但允许为 null。非空时严格为：
+
+{
+  word,
+  difference
+}
+
+comparison 对象同样禁止额外字段，两个字段都必须是非空字符串。只允许比较一个最相关替代表达。没有明显语义选择问题时必须返回 null，不强制制造同义词辨析。
+
+旧字段 phonetic、quickMeaning、paperMeaning、contextExplanation 和 confusableWord 不再属于当前 Schema，Provider 返回这些旧字段会被本地严格校验拒绝。
+
+五、架构影响
+
+本阶段没有修改 TRANSLATE_TEXT 消息、analysisMode、resultType 或 Provider 注册框架。Gemini 与 DeepSeek 继续共用同一 Skill，并分别沿用既有请求生命周期。
+
+百度和 Mock 快速翻译不受影响。状态查询、保存去重、右键菜单、popup 和浮窗关闭/取消/resize 行为没有改变。
+
+vocabularyEntries 仍只保存 id、word、contextSentence、pageTitle、pageUrl、createdAt。AI Quick/Detail 结果仍是运行时数据，不写入 chrome.storage.local，不需要迁移旧生词数据。
+
+六、测试结果
+
+已静态验证：
+
+- manifest.json 可解析，Manifest Version 仍为 3，插件版本为 0.7.0。
+- 所有项目顶层 JavaScript 文件通过 node --check 语法检查。
+- Stage6、Stage7、Stage8、Stage9、Stage9.2、Stage10、Stage11、Stage12 测试全部通过。
+- Quick/Detail Schema 的必需字段、额外字段拒绝、空字段拒绝和词性枚举已覆盖。
+- comparison 的对象、null、字符串、数组、额外字段和空内容路径已覆盖。
+- employed/apply、reinforcing effect 和 electrochemical 示例规则已覆盖。
+- Gemini 与 DeepSeek 提示词包含 JSON-only、新字段示例、上下文词性要求和 comparison 生成条件。
+- UI 源码不再使用 confusableWord 或“易混淆词”。
+- 生词 storage key 和持久化字段未改变。
+
+需要真实 Chrome 手动验证：
+
+- 使用真实 Gemini 和 DeepSeek API 验证模型稳定遵循新 Schema。
+- 验证 employed 能显示具体选词原因，并在适用时显示 apply 比较。
+- 验证 reinforcing effect 显示 adj. 且不会强制生成 comparison。
+- 验证 electrochemical 等无明显替代关系的词不显示“近义词区别”。
+- 验证长篇 wordChoiceReason/comparison 在可调尺寸浮窗中显示和滚动正常。
+- 回归验证快速连续划词、Detail 请求取消、浮窗 resize、保存生词、右键菜单和 popup。
+
+七、已知限制
+
+1. AI 输出质量仍取决于所选模型、上下文质量和 API 服务状态。
+2. 严格 Schema 能拒绝格式错误，但不能完全保证模型的语言判断一定正确。
+3. comparison 只允许一个替代表达，不提供同义词列表。
+4. 当前不保存 AI 分析结果，关闭浮窗后只能依赖 Provider 内存缓存或重新请求。
+5. PDF、Canvas、扫描文本和复杂阅读器仍可能无法提取完整上下文。
+6. 本阶段未执行真实 Chrome API 调用和人工视觉验收。
+
+八、版本变化
+
+- 插件版本：0.6.0 -> 0.7.0
+- AI Skill：context-analysis-v3 -> context-analysis-v4
+- Manifest Version：保持 3
+- storage key：保持 vocabularyEntries 和 translationSettings
+- 数据迁移：不需要
+
+本报告为 TXT 开发记录。未生成 DOCX、PDF 或 PNG，也未执行 LibreOffice 或视觉渲染检查。

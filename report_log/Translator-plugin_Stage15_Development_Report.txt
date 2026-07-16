@@ -1,0 +1,97 @@
+Translator-plugin Stage15 Development Report
+
+1. 阶段目标
+
+本阶段目标是继续压缩 Word Analysis 的信息密度，使浮窗更适合论文阅读中的快速停顿。AI 不替用户完成理解，只提供最小有效的信息支点：基础词义、当前句中含义，以及必要时一个近义词的核心语义区别。
+
+Sentence Translation、生词保存、popup、右键菜单、浮窗 resize、请求取消和旧响应隔离均保持不变。
+
+2. 修改文件
+
+- ai-context-skill.js：Word Skill 从 context-analysis-v4.1 升级为 context-analysis-v6，Detail 字段改为 meaningInSentence 和 comparison。
+- gemini-context-provider.js：同步 Gemini Word detail prompt、JSON 示例和 Schema 字段。
+- deepseek-context-provider.js：同步 DeepSeek Word detail prompt、JSON 示例和 Schema 字段。
+- content.js：Detail UI 改为读取 meaningInSentence，并删除 comparison.contextReason 展示。
+- manifest.json：版本升级为 0.10.0。
+- README.md：更新 Stage15 字段契约、极简输出原则和人工验收项。
+- tests/stage15-word-analysis-minimalism.test.js：新增 Stage15 测试。
+- 既有 Stage6-Stage14 测试：同步版本号和当前 Word Skill v6 字段契约。
+
+3. 修改原因
+
+Stage14 已删除 academicMeaning 和 wordChoiceReason，但 comparison 仍包含 contextReason，模型容易继续输出“为什么这里使用某词”“因此当前词更符合”之类总结句。Stage15 将 comparison 收缩为纯语义区别，减少原因分析、作者意图和背景扩展，让浮窗更短、更稳定。
+
+4. 技术方案
+
+Quick Schema 保持：
+
+{
+  word,
+  lemma,
+  phonetic,
+  partOfSpeech,
+  meaning
+}
+
+Detail Schema 改为：
+
+{
+  meaningInSentence,
+  comparison
+}
+
+comparison 为 null，或严格对象：
+
+{
+  word,
+  difference
+}
+
+Skill Instructions 明确写入：
+
+- AI 不替用户完成理解，只提供理解支点；
+- comparison 不是原因分析，而是语义区别；
+- employ vs apply 示例；
+- reinforcing vs strengthening 示例；
+- 禁止作者意图、背景扩展、写作建议、同义词列表和长篇总结。
+
+Gemini 与 DeepSeek 继续复用同一个 Word Skill。Provider endpoint、鉴权、超时、取消、缓存和错误映射未改。缓存 key 已包含 skillVersion，因此 context-analysis-v6 会自然隔离旧缓存。
+
+5. 测试结果
+
+已实现：
+
+- Word Skill 升级为 context-analysis-v6。
+- Detail 输出改为 meaningInSentence / comparison。
+- comparison 删除 contextReason。
+- Gemini 与 DeepSeek detail prompt 包含最小理解支点原则和两个 comparison 行为示例。
+- 浮窗 Detail UI 不再读取 contextualMeaning 或 contextReason。
+- manifest.json 升级到 0.10.0。
+
+已静态验证：
+
+- 顶层 JavaScript 文件通过 node --check。
+- Stage6 至 Stage15 测试通过。
+- manifest.json 可 UTF-8 读取并 JSON.parse。
+- git diff --check 未发现 whitespace error。
+- 静态确认未向 vocabularyEntries 写入 AI 字段。
+
+需要真实 Chrome 验证：
+
+- employed 的 employ/apply 比较是否足够短。
+- reinforcing 是否不强制生成 comparison。
+- exposed、robust、incorporate 的 meaningInSentence 是否简洁。
+- 完整句子仍进入 Sentence Translation。
+- 保存生词、右键菜单、popup、浮窗 resize 和快速连续划词是否正常。
+
+6. 当前架构变化
+
+架构没有新增模块。Word Analysis 仍走 content.js -> background.js -> translation-provider.js -> Gemini/DeepSeek Provider -> ai-context-skill.js。Sentence Translation 仍走 sentence-translation-skill.js。AI 结果仍只存在于运行时，不写入 chrome.storage.local。
+
+7. 已知限制
+
+- AI 仍可能输出不准确的词义，Schema 只能保证结构。
+- comparison 只允许一个近义词，不做完整词表。
+- 音标仍由 AI Provider 生成，不接入权威词典。
+- Detail 结果不持久化。
+- 当前不做写作辅助、第三层分析、云同步或 AI 结果入库。

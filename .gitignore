@@ -11,3 +11,14 @@ stage*_docx_render_check/
 Thumbs.db
 *.tmp
 *.log
+
+# Local credentials, user data exports, and private test fixtures
+.env
+.env.*
+*.env
+*.local
+translationSettings*.json
+vocabularyEntries*.json
+chrome-storage*.json
+local-storage*.json
+user-data/

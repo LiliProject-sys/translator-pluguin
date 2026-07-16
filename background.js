@@ -1,6 +1,7 @@
 importScripts(
   "md5.js",
   "ai-context-skill.js",
+  "sentence-translation-skill.js",
   "baidu-translation-provider.js",
   "deepseek-context-provider.js",
   "gemini-context-provider.js",
@@ -8,7 +9,10 @@ importScripts(
 );
 
 const STORAGE_KEY = "vocabularyEntries";
+const RANDOM_ORDER_KEY = "vocabularyRandomOrder";
 const CONTEXT_MENU_ID = "add-to-vocabulary";
+const SUPPLEMENTAL_FIELDS = ["lemma", "phonetic", "partOfSpeech", "meaning", "contextTranslation"];
+const contextTranslationTasks = new Map();
 
 chrome.runtime.onInstalled.addListener(createContextMenu);
 chrome.runtime.onStartup.addListener(createContextMenu);
@@ -124,8 +128,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "TRANSLATE_TEXT") {
-    handleLanguageRequest(message.payload || {}, sendResponse);
+    const payload = message.payload || {};
+    if (normalizeAnalysisMode(payload.analysisMode) === "detail") {
+      console.info("DETAIL_REQUEST_RECEIVED", {
+        analysisMode: "detail",
+        requestId: normalizeText(payload.requestId),
+        selectionId: Number.isFinite(payload.selectionId) ? payload.selectionId : null,
+        analysisRequestId: Number.isFinite(payload.analysisRequestId) ? payload.analysisRequestId : null
+      });
+    }
+    handleLanguageRequest(payload, sendResponse);
     return true;
+  }
+
+  if (message.type === "CANCEL_LANGUAGE_REQUEST") {
+    const requestIds = Array.isArray(message.requestIds)
+      ? message.requestIds.map(normalizeText).filter(Boolean)
+      : [];
+    const cancelledCount = self.languageService && typeof self.languageService.cancelRequests === "function"
+      ? self.languageService.cancelRequests(requestIds)
+      : 0;
+    sendResponse({ status: "ok", cancelledCount });
+    return false;
   }
 
   if (message.type === "GET_ACTIVE_LANGUAGE_MODE") {
@@ -154,6 +178,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       sendResponse({ status: "ok" });
     });
+    return true;
+  }
+
+  if (message.type === "DELETE_VOCABULARY_ENTRY") {
+    deleteVocabularyEntry(normalizeText(message.entryId), sendResponse);
+    return true;
+  }
+
+  if (message.type === "OPEN_VOCABULARY_SOURCE") {
+    openVocabularySource(normalizeText(message.pageUrl), sendResponse);
+    return true;
+  }
+
+  if (message.type === "GENERATE_VOCABULARY_CONTEXT_TRANSLATION") {
+    handleVocabularyContextTranslation(message.entry || {}, sendResponse);
     return true;
   }
 
@@ -206,11 +245,23 @@ function handleLanguageRequest(payload, sendResponse, providerOverride) {
     contextSentence: normalizeText(payload.contextSentence),
     pageTitle: normalizeText(payload.pageTitle),
     sourceLanguage: normalizeText(payload.sourceLanguage) || "en",
-    targetLanguage: normalizeText(payload.targetLanguage) || "zh-CN"
+    targetLanguage: normalizeText(payload.targetLanguage) || "zh-CN",
+    requestType: normalizeRequestType(payload.requestType),
+    analysisMode: normalizeAnalysisMode(payload.analysisMode),
+    requestId: normalizeText(payload.requestId),
+    userQuestion: normalizeText(payload.userQuestion)
   }, { providerOverride }).then((result) => {
     sendResponse({ status: "ok", ...result });
   }).catch((error) => {
     const safeError = normalizeTranslationError(error);
+    if (safeError.errorCode === "REQUEST_CANCELLED") {
+      sendResponse({
+        status: "cancelled",
+        message: "请求已取消",
+        errorCode: safeError.errorCode
+      });
+      return;
+    }
     const diagnosticLog = {
       code: safeError.errorCode,
       type: safeError.errorType
@@ -219,6 +270,8 @@ function handleLanguageRequest(payload, sendResponse, providerOverride) {
     if (safeError.diagnostics) {
       Object.assign(diagnosticLog, safeError.diagnostics);
     }
+    diagnosticLog.analysisMode = normalizeAnalysisMode(payload && payload.analysisMode);
+    diagnosticLog.requestType = normalizeRequestType(payload && payload.requestType);
 
     console.error("Language request failed:", diagnosticLog);
     sendResponse({
@@ -261,7 +314,9 @@ function createProviderTestPayload(providerId) {
       : "I ate an apple after lunch.",
     pageTitle: "Translator-plugin Provider Test",
     sourceLanguage: "en",
-    targetLanguage: "zh-CN"
+    targetLanguage: "zh-CN",
+    requestType: "wordAnalysis",
+    analysisMode: "quick"
   };
 }
 
@@ -289,8 +344,15 @@ function normalizeErrorDiagnostics(rawDiagnostics) {
     httpStatus: Number.isFinite(rawDiagnostics.httpStatus) ? rawDiagnostics.httpStatus : 0,
     apiStatus: normalizeText(rawDiagnostics.apiStatus),
     apiMessage: normalizeText(rawDiagnostics.apiMessage),
+    analysisMode: normalizeAnalysisMode(rawDiagnostics.analysisMode),
     requestId: normalizeText(rawDiagnostics.requestId)
   };
+}
+
+function normalizeRequestType(value) {
+  return normalizeText(value) === "sentenceTranslation"
+    ? "sentenceTranslation"
+    : "wordAnalysis";
 }
 
 function saveVocabularyEntry(rawEntry, options) {
@@ -306,6 +368,7 @@ function saveVocabularyEntry(rawEntry, options) {
     const entry = {
       id: createId(),
       word: comparableEntry.word,
+      ...getSupplementalFields(comparableEntry),
       contextSentence: comparableEntry.contextSentence,
       pageTitle: comparableEntry.pageTitle,
       pageUrl: comparableEntry.pageUrl,
@@ -315,15 +378,20 @@ function saveVocabularyEntry(rawEntry, options) {
     const matchStatus = getVocabularyMatchStatus(entries, entry);
 
     if (matchStatus.exactEntryExists) {
-      if (saveOptions.showToast) {
-        showPageNotice(saveOptions.tabId, "该词已保存");
-      }
-      if (saveOptions.callback) {
-        saveOptions.callback({
-          status: "duplicate",
-          message: "已保存"
+      const mergeResult = mergeMissingVocabularyFields(entries, matchStatus.exactEntryIndex, entry);
+      if (mergeResult.changed) {
+        chrome.storage.local.set({ [STORAGE_KEY]: mergeResult.entries }, () => {
+          if (chrome.runtime.lastError) {
+            handleSaveError(saveOptions, chrome.runtime.lastError.message);
+            return;
+          }
+
+          handleDuplicateSave(saveOptions, mergeResult.entries[matchStatus.exactEntryIndex]);
         });
+        return;
       }
+
+      handleDuplicateSave(saveOptions, entries[matchStatus.exactEntryIndex]);
       return;
     }
 
@@ -341,7 +409,9 @@ function saveVocabularyEntry(rawEntry, options) {
       if (saveOptions.callback) {
         saveOptions.callback({
           status: "saved",
-          message: "已加入"
+          message: "已加入",
+          entryId: entry.id,
+          hasContextTranslation: !!entry.contextTranslation
         });
       }
     });
@@ -366,34 +436,369 @@ function createComparableEntry(rawEntry) {
 
   return {
     word,
+    ...getSupplementalFields(rawEntry),
     contextSentence: normalizeText(rawEntry && rawEntry.contextSentence) || word,
     pageTitle: normalizeText(rawEntry && rawEntry.pageTitle) || "未命名页面",
     pageUrl: normalizeText(rawEntry && rawEntry.pageUrl)
   };
 }
 
+function getSupplementalFields(rawEntry) {
+  return SUPPLEMENTAL_FIELDS.reduce((fields, field) => {
+    const value = normalizeText(rawEntry && rawEntry[field]);
+    if (value) {
+      fields[field] = value;
+    }
+    return fields;
+  }, {});
+}
+
+function mergeMissingVocabularyFields(entries, entryIndex, candidate) {
+  if (!Number.isInteger(entryIndex) || entryIndex < 0 || entryIndex >= entries.length) {
+    return { changed: false, entries };
+  }
+
+  const existingEntry = entries[entryIndex] || {};
+  const updates = {};
+
+  SUPPLEMENTAL_FIELDS.forEach((field) => {
+    const existingValue = normalizeText(existingEntry[field]);
+    const candidateValue = normalizeText(candidate[field]);
+    if (!existingValue && candidateValue) {
+      updates[field] = candidateValue;
+    }
+  });
+
+  if (Object.keys(updates).length === 0) {
+    return { changed: false, entries };
+  }
+
+  const nextEntries = entries.slice();
+  nextEntries[entryIndex] = {
+    ...existingEntry,
+    ...updates
+  };
+
+  return { changed: true, entries: nextEntries };
+}
+
+function handleDuplicateSave(saveOptions, existingEntry) {
+  if (saveOptions.showToast) {
+    showPageNotice(saveOptions.tabId, "该词已保存");
+  }
+  if (saveOptions.callback) {
+    saveOptions.callback({
+      status: "duplicate",
+      message: "已保存",
+      entryId: existingEntry && existingEntry.id ? existingEntry.id : "",
+      hasContextTranslation: !!(existingEntry && normalizeText(existingEntry.contextTranslation))
+    });
+  }
+}
+
 function getVocabularyMatchStatus(entries, candidate) {
   const candidateWordKey = normalizeWordForMatch(candidate.word);
   let wordExists = false;
   let exactEntryExists = false;
+  let exactEntryIndex = -1;
 
-  entries.forEach((existingEntry) => {
+  entries.forEach((existingEntry, index) => {
     if (normalizeWordForMatch(existingEntry && existingEntry.word) === candidateWordKey) {
       wordExists = true;
     }
 
-    if (existingEntry
+    if (!exactEntryExists
+      && existingEntry
       && existingEntry.word === candidate.word
       && existingEntry.contextSentence === candidate.contextSentence
       && existingEntry.pageUrl === candidate.pageUrl) {
       exactEntryExists = true;
+      exactEntryIndex = index;
     }
   });
 
   return {
     wordExists,
-    exactEntryExists
+    exactEntryExists,
+    exactEntryIndex
   };
+}
+
+function deleteVocabularyEntry(entryId, sendResponse) {
+  if (!entryId) {
+    sendResponse({ status: "error", message: "删除失败" });
+    return;
+  }
+
+  readEntries((entries, readError) => {
+    if (readError) {
+      sendResponse({ status: "error", message: "删除失败" });
+      return;
+    }
+
+    const nextEntries = entries.filter((entry) => entry && entry.id !== entryId);
+    chrome.storage.local.set({ [STORAGE_KEY]: nextEntries }, () => {
+      if (chrome.runtime.lastError) {
+        console.error("Failed to delete vocabulary entry:", chrome.runtime.lastError.message);
+        sendResponse({ status: "error", message: "删除失败" });
+        return;
+      }
+
+      removeEntryFromRandomOrder(entryId, () => {
+        sendResponse({ status: "ok" });
+      });
+    });
+  });
+}
+
+function removeEntryFromRandomOrder(entryId, callback) {
+  if (!chrome.storage.session) {
+    callback();
+    return;
+  }
+
+  chrome.storage.session.get({ [RANDOM_ORDER_KEY]: [] }, (result) => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to read vocabulary random order:", chrome.runtime.lastError.message);
+      callback();
+      return;
+    }
+
+    const currentOrder = Array.isArray(result[RANDOM_ORDER_KEY]) ? result[RANDOM_ORDER_KEY] : [];
+    const nextOrder = currentOrder.filter((id) => id !== entryId);
+    chrome.storage.session.set({ [RANDOM_ORDER_KEY]: nextOrder }, () => {
+      if (chrome.runtime.lastError) {
+        console.error("Failed to update vocabulary random order:", chrome.runtime.lastError.message);
+      }
+      callback();
+    });
+  });
+}
+
+function openVocabularySource(pageUrl, sendResponse) {
+  const url = normalizeSourceUrl(pageUrl);
+  if (!url) {
+    sendResponse({ status: "error", message: "来源地址无效" });
+    return;
+  }
+
+  chrome.tabs.create({ url }, () => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to open source page:", chrome.runtime.lastError.message);
+      sendResponse({ status: "error", message: "无法打开来源" });
+      return;
+    }
+
+    sendResponse({ status: "ok" });
+  });
+}
+
+async function handleVocabularyContextTranslation(rawEntry, sendResponse) {
+  try {
+    const result = await generateVocabularyContextTranslation(rawEntry);
+    sendResponse(result);
+  } catch (error) {
+    const safeError = normalizeTranslationError(error);
+    console.error("Failed to generate vocabulary context translation:", {
+      code: safeError.errorCode,
+      type: safeError.errorType
+    });
+    sendResponse({
+      status: "error",
+      message: "语境翻译失败",
+      errorCode: safeError.errorCode
+    });
+  }
+}
+
+async function generateVocabularyContextTranslation(rawEntry) {
+  const entryId = normalizeText(rawEntry && rawEntry.entryId);
+  const contextSentence = normalizeText(rawEntry && rawEntry.contextSentence);
+  const pageUrl = normalizeText(rawEntry && rawEntry.pageUrl);
+  const word = normalizeText(rawEntry && rawEntry.word);
+
+  if (!entryId || !shouldTranslateVocabularyContext(word, contextSentence)) {
+    return { status: "skipped", reason: "not_needed" };
+  }
+
+  const entries = await readEntriesAsync();
+  const targetEntry = entries.find((entry) => entry && entry.id === entryId);
+  if (!targetEntry || normalizeText(targetEntry.contextTranslation)) {
+    return { status: "skipped", reason: "entry_missing_or_translated" };
+  }
+
+  const contextKey = createVocabularyContextKey(pageUrl || targetEntry.pageUrl, contextSentence || targetEntry.contextSentence);
+  if (!contextKey) {
+    return { status: "skipped", reason: "invalid_context" };
+  }
+
+  const existingTranslation = await findExistingContextTranslation(contextKey);
+  if (existingTranslation) {
+    const updatedCount = await writeContextTranslationForMatchingEntries(contextKey, existingTranslation);
+    return {
+      status: "ok",
+      reused: true,
+      updatedCount,
+      contextTranslation: existingTranslation
+    };
+  }
+
+  if (contextTranslationTasks.has(contextKey)) {
+    return contextTranslationTasks.get(contextKey);
+  }
+
+  const task = runVocabularyContextTranslationTask(contextKey, contextSentence || targetEntry.contextSentence)
+    .finally(() => {
+      contextTranslationTasks.delete(contextKey);
+    });
+  contextTranslationTasks.set(contextKey, task);
+  return task;
+}
+
+async function runVocabularyContextTranslationTask(contextKey, contextSentence) {
+  if (!self.languageService || typeof self.languageService.process !== "function") {
+    throw createRuntimeError("LANGUAGE_SERVICE_UNAVAILABLE", "Language service is unavailable.");
+  }
+
+  const result = await self.languageService.process({
+    text: contextSentence,
+    contextSentence,
+    pageTitle: "Vocabulary Context Translation",
+    sourceLanguage: "en",
+    targetLanguage: "zh-CN",
+    requestType: "sentenceTranslation",
+    analysisMode: "quick",
+    requestId: `vocabulary-context-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  });
+  const translation = extractContextTranslationText(result);
+  if (!translation) {
+    throw createRuntimeError("EMPTY_CONTEXT_TRANSLATION", "Language provider returned empty context translation.");
+  }
+
+  const updatedCount = await writeContextTranslationForMatchingEntries(contextKey, translation);
+  return {
+    status: "ok",
+    reused: false,
+    updatedCount,
+    contextTranslation: translation
+  };
+}
+
+function extractContextTranslationText(result) {
+  if (!result || typeof result !== "object") {
+    return "";
+  }
+  if (result.resultType === "sentenceTranslation") {
+    return normalizeText(result.translation);
+  }
+  if (result.resultType === "quickTranslation") {
+    return normalizeText(result.translatedText);
+  }
+  return "";
+}
+
+async function findExistingContextTranslation(contextKey) {
+  const entries = await readEntriesAsync();
+  const match = entries.find((entry) => {
+    return entry
+      && createVocabularyContextKey(entry.pageUrl, entry.contextSentence) === contextKey
+      && normalizeText(entry.contextTranslation);
+  });
+  return match ? normalizeText(match.contextTranslation) : "";
+}
+
+async function writeContextTranslationForMatchingEntries(contextKey, translation) {
+  const normalizedTranslation = normalizeText(translation);
+  if (!contextKey || !normalizedTranslation) {
+    return 0;
+  }
+
+  const entries = await readEntriesAsync();
+  let updatedCount = 0;
+  const nextEntries = entries.map((entry) => {
+    if (!entry
+      || createVocabularyContextKey(entry.pageUrl, entry.contextSentence) !== contextKey
+      || normalizeText(entry.contextTranslation)) {
+      return entry;
+    }
+
+    updatedCount += 1;
+    return {
+      ...entry,
+      contextTranslation: normalizedTranslation
+    };
+  });
+
+  if (updatedCount > 0) {
+    await writeEntriesAsync(nextEntries);
+  }
+
+  return updatedCount;
+}
+
+function shouldTranslateVocabularyContext(word, contextSentence) {
+  const normalizedWord = normalizeWordForMatch(word);
+  const normalizedContext = normalizeWordForMatch(contextSentence);
+  if (!normalizedContext) {
+    return false;
+  }
+
+  const hasSentenceBoundary = /[.?!;]/.test(contextSentence);
+  const wordCount = normalizedContext.split(/\s+/).filter(Boolean).length;
+  if (normalizedWord && normalizedWord === normalizedContext && wordCount <= 3 && !hasSentenceBoundary) {
+    return false;
+  }
+
+  return true;
+}
+
+function createVocabularyContextKey(pageUrl, contextSentence) {
+  const normalizedContext = normalizeWordForMatch(contextSentence);
+  if (!normalizedContext) {
+    return "";
+  }
+  return `${normalizeText(pageUrl)}\n${normalizedContext}`;
+}
+
+function readEntriesAsync() {
+  return new Promise((resolve, reject) => {
+    readEntries((entries, readError) => {
+      if (readError) {
+        reject(createRuntimeError("STORAGE_READ_FAILED", readError));
+        return;
+      }
+      resolve(entries);
+    });
+  });
+}
+
+function writeEntriesAsync(entries) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set({ [STORAGE_KEY]: entries }, () => {
+      if (chrome.runtime.lastError) {
+        reject(createRuntimeError("STORAGE_WRITE_FAILED", chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function createRuntimeError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  error.publicMessage = "语境翻译失败";
+  return error;
+}
+
+function normalizeSourceUrl(pageUrl) {
+  try {
+    const url = new URL(normalizeText(pageUrl));
+    const allowedProtocols = new Set(["http:", "https:", "file:", "chrome-extension:"]);
+    return allowedProtocols.has(url.protocol) ? url.href : "";
+  } catch (error) {
+    return "";
+  }
 }
 
 function normalizeWordForMatch(value) {
@@ -432,6 +837,10 @@ function showPageNotice(tabId, message) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeAnalysisMode(value) {
+  return normalizeText(value).toLocaleLowerCase() === "detail" ? "detail" : "quick";
 }
 
 function createId() {

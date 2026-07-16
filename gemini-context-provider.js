@@ -16,8 +16,10 @@
       ? Math.max(1, providerOptions.timeoutMs)
       : DEFAULT_TIMEOUT_MS;
     const skill = providerOptions.skill || globalScope.aiContextSkill;
+    const sentenceSkill = providerOptions.sentenceSkill || globalScope.sentenceTranslationSkill;
     const cache = new Map();
     let activeController = null;
+    let activeClientRequestId = "";
 
     if (!skill || typeof skill.buildInput !== "function" || typeof skill.validateAnalysis !== "function") {
       throw new Error("Gemini provider requires the AI context skill.");
@@ -27,10 +29,19 @@
       id: "gemini",
 
       async analyze(request) {
-        const input = skill.buildInput(request);
+        const requestType = normalizeRequestType(request && request.requestType);
+        const activeSkill = requestType === "sentenceTranslation" ? sentenceSkill : skill;
+        if (requestType === "sentenceTranslation" && (!activeSkill || typeof activeSkill.buildInput !== "function" || typeof activeSkill.validateTranslation !== "function")) {
+          throw new Error("Gemini provider requires the sentence translation skill for sentenceTranslation requests.");
+        }
+        const input = activeSkill.buildInput(request);
         const settings = await readSettings(storageArea);
         const apiKey = normalizeText(settings.geminiApiKey);
         const model = normalizeModel(settings.geminiModel) || DEFAULT_MODEL;
+        const analysisMode = requestType === "sentenceTranslation" ? "quick" : skill.normalizeAnalysisMode
+          ? skill.normalizeAnalysisMode(request && request.analysisMode)
+          : normalizeAnalysisMode(request && request.analysisMode);
+        const clientRequestId = normalizeText(request && request.requestId);
 
         if (!apiKey) {
           throw createProviderError(
@@ -40,9 +51,9 @@
           );
         }
 
-        const cacheKey = createCacheKey(input, model, skill.skillVersion);
+        const cacheKey = createCacheKey(input, model, activeSkill.skillVersion, analysisMode, requestType);
         if (cache.has(cacheKey)) {
-          return createResult(cache.get(cacheKey), true);
+          return createResult(cache.get(cacheKey), activeSkill, analysisMode, requestType, true);
         }
 
         if (activeController) {
@@ -52,46 +63,85 @@
         const requestId = createRequestId();
         const controller = new AbortController();
         activeController = controller;
+        activeClientRequestId = clientRequestId;
         const timeoutId = setTimer(() => controller.abort("timeout"), timeoutMs);
 
         try {
+          if (analysisMode === "detail") {
+            console.info("GEMINI_DETAIL_REQUEST_START", {
+              model,
+              analysisMode,
+              requestId: clientRequestId || requestId
+            });
+          }
+
           const response = await fetchImpl(GEMINI_INTERACTIONS_ENDPOINT, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               "x-goog-api-key": apiKey
             },
-            body: JSON.stringify(createRequestBody(input, skill, model)),
+            body: JSON.stringify(createRequestBody(input, activeSkill, model, analysisMode, requestType)),
             signal: controller.signal
           });
 
           const responseData = await readResponseBody(response);
+          if (analysisMode === "detail") {
+            const diagnostics = createDiagnostics(
+              requestId,
+              response.status,
+              responseData,
+              input,
+              apiKey,
+              analysisMode
+            );
+            console.info("GEMINI_DETAIL_RESPONSE", {
+              httpStatus: diagnostics.httpStatus,
+              apiStatus: diagnostics.apiStatus,
+              apiMessage: diagnostics.apiMessage,
+              analysisMode,
+              requestId: clientRequestId || requestId
+            });
+          }
           if (!response.ok) {
-            throw mapHttpError(response.status, responseData, requestId, input, apiKey);
+            throw mapHttpError(response.status, responseData, requestId, input, apiKey, analysisMode);
           }
 
-          const analysisText = extractInteractionText(responseData, requestId, input, apiKey);
-          let rawAnalysis;
+          const analysisText = extractInteractionText(responseData, requestId, input, apiKey, analysisMode);
+          let rawResult;
           try {
-            rawAnalysis = JSON.parse(analysisText);
+            rawResult = JSON.parse(analysisText);
           } catch (error) {
             throw createProviderError(
               "INVALID_JSON",
               "Gemini 返回的语境解析无法读取",
-              { diagnostics: createDiagnostics(requestId, response.status, responseData, input, apiKey) }
+              { diagnostics: createDiagnostics(requestId, response.status, responseData, input, apiKey, analysisMode) }
             );
           }
 
-          const analysis = skill.validateAnalysis(rawAnalysis);
-          cache.set(cacheKey, analysis);
-          return createResult(analysis, false);
+          const result = requestType === "sentenceTranslation"
+            ? activeSkill.validateTranslation(rawResult)
+            : activeSkill.validateAnalysis(rawResult, analysisMode);
+          cache.set(cacheKey, result);
+          return createResult(result, activeSkill, analysisMode, requestType, false);
         } catch (error) {
-          if (error && error.name === "AbortError") {
-            const isTimeout = controller.signal.reason === "timeout";
+          if (controller.signal.aborted || (error && error.name === "AbortError")) {
+            const abortReason = controller.signal.reason;
+            const isTimeout = abortReason === "timeout";
+            const isPanelClosed = abortReason === "panel-closed";
+            if (analysisMode === "detail") {
+              console.info("GEMINI_DETAIL_REQUEST_ABORTED", {
+                reason: isTimeout ? "timeout" : isPanelClosed ? "panel-closed" : "superseded",
+                analysisMode,
+                requestId: clientRequestId || requestId
+              });
+            }
             throw createProviderError(
-              isTimeout ? "REQUEST_TIMEOUT" : "REQUEST_SUPERSEDED",
-              isTimeout ? "Gemini 请求超时，请重试" : "Gemini 请求已被新的选词替换",
-              { diagnostics: createDiagnostics(requestId, 0, {}, input, apiKey) }
+              isTimeout ? "REQUEST_TIMEOUT" : isPanelClosed ? "REQUEST_CANCELLED" : "REQUEST_SUPERSEDED",
+              isTimeout
+                ? "Gemini 请求超时，请重试"
+                : isPanelClosed ? "Gemini 请求已取消" : "Gemini 请求已被新的选词替换",
+              { diagnostics: createDiagnostics(requestId, 0, {}, input, apiKey, analysisMode) }
             );
           }
 
@@ -102,14 +152,23 @@
           throw createProviderError(
             "NETWORK_ERROR",
             "无法连接 Gemini，请检查网络后重试",
-            { diagnostics: createDiagnostics(requestId, 0, {}, input, apiKey) }
+            { diagnostics: createDiagnostics(requestId, 0, {}, input, apiKey, analysisMode) }
           );
         } finally {
           clearTimer(timeoutId);
           if (activeController === controller) {
             activeController = null;
+            activeClientRequestId = "";
           }
         }
+      },
+
+      cancelRequest(requestId) {
+        if (!activeController || !activeClientRequestId || activeClientRequestId !== normalizeText(requestId)) {
+          return false;
+        }
+        activeController.abort("panel-closed");
+        return true;
       },
 
       clearCache() {
@@ -121,40 +180,149 @@
         if (activeController) {
           activeController.abort("settings-changed");
           activeController = null;
+          activeClientRequestId = "";
         }
       }
     };
 
-    function createResult(analysis, cached) {
+    function createResult(result, activeSkill, analysisMode, requestType, cached) {
+      if (requestType === "sentenceTranslation") {
+        return {
+          provider: "gemini",
+          resultType: "sentenceTranslation",
+          skillVersion: activeSkill.skillVersion,
+          translation: result.translation,
+          keyTerm: result.keyTerm,
+          cached
+        };
+      }
       return {
         provider: "gemini",
         resultType: "contextAnalysis",
-        skillVersion: skill.skillVersion,
-        analysis: { ...analysis },
+        skillVersion: activeSkill.skillVersion,
+        analysisMode,
+        analysis: { ...result },
         cached
       };
     }
   }
 
-  function createRequestBody(input, skill, model) {
+  function createRequestBody(input, skill, model, analysisMode, requestType) {
     return {
       model: normalizeModel(model) || DEFAULT_MODEL,
-      system_instruction: skill.instructions,
-      input: JSON.stringify(input),
+      system_instruction: createModeInstructions(skill, analysisMode, requestType),
+      input: JSON.stringify(createModeInput(input, analysisMode, requestType)),
       response_format: {
         type: "text",
         mime_type: "application/json",
-        schema: skill.outputSchema
+        schema: toGeminiStructuredOutputSchema(getModeSchema(skill, analysisMode))
       },
       store: false
     };
   }
 
-  function extractInteractionText(responseData, requestId, input, apiKey) {
+  function createModeInstructions(skill, analysisMode, requestType) {
+    if (normalizeRequestType(requestType) === "sentenceTranslation") {
+      const sentenceExample = {
+        translation: "研究人员通过电化学方法评估了该材料的性能。",
+        keyTerm: {
+          term: "electrochemical method",
+          meaning: "电化学方法，利用电极反应或电化学信号进行测量、分析或调控的方法。"
+        }
+      };
+      return `${skill.instructions} Return JSON only with exactly translation and keyTerm. keyTerm must be null unless one technical term clearly blocks comprehension; when present it must contain exactly term and meaning, never a list. Sentence Translation must not provide IPA, part of speech, comparison, word-choice analysis, or extra explanation. Do not output Markdown, code fences, or text outside the JSON object. Sentence Translation JSON example: ${JSON.stringify(sentenceExample)}`;
+    }
+    const mode = normalizeAnalysisMode(analysisMode);
+    const quickExample = {
+      word: "employed",
+      lemma: "employ",
+      phonetic: "/ɪmˈplɔɪ/",
+      partOfSpeech: "v.",
+      meaning: "使用；采用"
+    };
+    const detailExample = {
+      meaningInSentence: "表示将3D打印技术作为生产3D对象的制造手段使用。",
+      comparison: {
+        word: "apply",
+        difference: "employ 强调把技术、工具作为手段使用；apply 强调把方法作用于具体对象。"
+      }
+    };
+    const comparisonExamples = [
+      "employ vs apply:",
+      "employ emphasizes using a technology or tool as a means.",
+      "apply emphasizes applying a method to a concrete object.",
+      "reinforcing vs strengthening:",
+      "reinforcing emphasizes enhancing an existing structure or performance.",
+      "strengthening emphasizes making something stronger overall."
+    ].join(" ");
+    const modeRules = mode === "detail"
+      ? [
+        "Mode: detail.",
+        "Return JSON only with exactly meaningInSentence and comparison.",
+        "AI must not complete understanding for the user; provide only minimal anchors that help the user continue reading.",
+        "meaningInSentence must briefly explain what the selected word means in the current sentence.",
+        "comparison is a semantic difference, not a reason analysis and not an author-intention analysis.",
+        "comparison must contain exactly word and difference for one close synonym only when an obvious semantic distinction exists; otherwise use null.",
+        `Comparison examples: ${comparisonExamples}`,
+        "Do not explain why the author chose the word.",
+        "Do not write phrases like 'therefore this word is used here'.",
+        "Do not output author intention, paper background expansion, long summary, writing advice, synonym lists, or contextReason.",
+        `Detail JSON example: ${JSON.stringify(detailExample)}`
+      ]
+      : [
+        "Mode: quick.",
+        "Return JSON only with exactly word, lemma, phonetic, partOfSpeech, meaning.",
+        "lemma must be the true dictionary base form only; do not explain inflection.",
+        "partOfSpeech must describe the word's actual function in the current sentence, not its surface form.",
+        "meaning must be the common Simplified Chinese meaning of the word; do not add a separate academic meaning field.",
+        `Quick JSON example: ${JSON.stringify(quickExample)}`
+      ];
+    return `${skill.instructions} ${modeRules.join(" ")}`;
+  }
+
+  function createModeInput(input, analysisMode, requestType) {
+    if (normalizeRequestType(requestType) === "sentenceTranslation") {
+      return input;
+    }
+    if (normalizeAnalysisMode(analysisMode) === "detail") {
+      return {
+        word: input.targetText,
+        sentence: input.contextSentence,
+        context: input.pageTitle,
+        userQuestion: input.userQuestion || "请详细解释该词在当前论文语境中的用法。"
+      };
+    }
+    return input;
+  }
+
+  function getModeSchema(skill, analysisMode) {
+    if (typeof skill.getOutputSchema === "function") {
+      return skill.getOutputSchema(analysisMode);
+    }
+    return skill.outputSchema;
+  }
+
+  function toGeminiStructuredOutputSchema(schema) {
+    if (Array.isArray(schema)) {
+      return schema.map(toGeminiStructuredOutputSchema);
+    }
+    if (!schema || typeof schema !== "object") {
+      return schema;
+    }
+
+    const converted = {};
+    Object.keys(schema).forEach((key) => {
+      const value = schema[key];
+      converted[key] = toGeminiStructuredOutputSchema(value);
+    });
+    return converted;
+  }
+
+  function extractInteractionText(responseData, requestId, input, apiKey, analysisMode) {
     const interactionStatus = normalizeText(responseData && responseData.status).toLocaleLowerCase();
 
     if (interactionStatus !== "completed") {
-      throw createInteractionStatusError(interactionStatus, responseData, requestId, input, apiKey);
+      throw createInteractionStatusError(interactionStatus, responseData, requestId, input, apiKey, analysisMode);
     }
 
     const steps = responseData && Array.isArray(responseData.steps) ? responseData.steps : [];
@@ -167,7 +335,7 @@
       .join("");
 
     if (!text) {
-      const diagnostics = createDiagnostics(requestId, 200, responseData, input, apiKey);
+      const diagnostics = createDiagnostics(requestId, 200, responseData, input, apiKey, analysisMode);
       if (isSafetyRefusal(responseData)) {
         throw createProviderError("CONTENT_BLOCKED", "Gemini 拒绝处理当前内容", { diagnostics });
       }
@@ -180,8 +348,8 @@
     return text;
   }
 
-  function createInteractionStatusError(status, responseData, requestId, input, apiKey) {
-    const diagnostics = createDiagnostics(requestId, 200, responseData, input, apiKey);
+  function createInteractionStatusError(status, responseData, requestId, input, apiKey, analysisMode) {
+    const diagnostics = createDiagnostics(requestId, 200, responseData, input, apiKey, analysisMode);
     const statusErrors = {
       failed: ["INTERACTION_FAILED", "Gemini 处理失败，请重试"],
       incomplete: ["INTERACTION_INCOMPLETE", "Gemini 返回结果不完整，请重试"],
@@ -208,10 +376,10 @@
     }
   }
 
-  function mapHttpError(status, responseData, requestId, input, apiKey) {
+  function mapHttpError(status, responseData, requestId, input, apiKey, analysisMode) {
     const apiStatus = normalizeText(responseData && responseData.error && responseData.error.status);
     const errorOptions = {
-      diagnostics: createDiagnostics(requestId, status, responseData, input, apiKey)
+      diagnostics: createDiagnostics(requestId, status, responseData, input, apiKey, analysisMode)
     };
 
     if (status === 400) {
@@ -252,7 +420,7 @@
     return createProviderError("API_ERROR", "Gemini 请求失败，请稍后重试", errorOptions);
   }
 
-  function createDiagnostics(requestId, httpStatus, responseData, input, apiKey) {
+  function createDiagnostics(requestId, httpStatus, responseData, input, apiKey, analysisMode) {
     const apiError = responseData && responseData.error && typeof responseData.error === "object"
       ? responseData.error
       : {};
@@ -261,6 +429,7 @@
       httpStatus: Number.isFinite(httpStatus) ? httpStatus : 0,
       apiStatus: sanitizeDiagnosticValue(apiError.status, input, apiKey, 80),
       apiMessage: sanitizeDiagnosticValue(apiError.message, input, apiKey, MAX_DIAGNOSTIC_MESSAGE_LENGTH),
+      analysisMode: normalizeAnalysisMode(analysisMode),
       requestId
     };
   }
@@ -338,8 +507,10 @@
     });
   }
 
-  function createCacheKey(input, model, skillVersion) {
+  function createCacheKey(input, model, skillVersion, analysisMode, requestType) {
     return JSON.stringify([
+      normalizeRequestType(requestType),
+      normalizeAnalysisMode(analysisMode),
       normalizeText(input.targetText).toLocaleLowerCase(),
       normalizeText(input.contextSentence),
       normalizeText(input.pageTitle),
@@ -350,6 +521,16 @@
 
   function normalizeModel(value) {
     return normalizeText(value).replace(/^models\//, "");
+  }
+
+  function normalizeAnalysisMode(value) {
+    return normalizeText(value).toLocaleLowerCase() === "detail" ? "detail" : "quick";
+  }
+
+  function normalizeRequestType(value) {
+    return normalizeText(value) === "sentenceTranslation"
+      ? "sentenceTranslation"
+      : "wordAnalysis";
   }
 
   function createRequestId() {
@@ -378,6 +559,7 @@
     createGeminiContextProvider,
     createRequestBody,
     extractInteractionText,
+    toGeminiStructuredOutputSchema,
     sanitizeDiagnosticValue
   });
 })(self);

@@ -35,6 +35,7 @@
     let lastRequestStartedAt = -rateLimitMs;
     let pendingRequest = null;
     let pendingTimer = null;
+    let activeRequest = null;
 
     if (typeof md5 !== "function") {
       throw new Error("Baidu provider requires a local MD5 implementation.");
@@ -80,8 +81,31 @@
           text,
           sourceLanguage,
           targetLanguage,
-          cacheKey
+          cacheKey,
+          requestId: normalizeText(request && request.requestId)
         });
+      },
+
+      cancelRequest(requestId) {
+        const normalizedRequestId = normalizeText(requestId);
+        let cancelled = false;
+
+        if (pendingRequest && pendingRequest.requestData.requestId === normalizedRequestId) {
+          if (pendingTimer !== null) {
+            clearTimer(pendingTimer);
+            pendingTimer = null;
+          }
+          pendingRequest.reject(createTranslationError("REQUEST_CANCELLED", "翻译请求已取消"));
+          pendingRequest = null;
+          cancelled = true;
+        }
+
+        if (activeRequest && activeRequest.requestData.requestId === normalizedRequestId) {
+          activeRequest.controller.abort("panel-closed");
+          cancelled = true;
+        }
+
+        return cancelled;
       },
 
       clearCache() {
@@ -99,6 +123,11 @@
         if (pendingRequest) {
           pendingRequest.reject(createTranslationError("SETTINGS_CHANGED", "翻译配置已更新，请重试"));
           pendingRequest = null;
+        }
+
+        if (activeRequest) {
+          activeRequest.controller.abort("settings-changed");
+          activeRequest = null;
         }
       }
     };
@@ -142,20 +171,27 @@
         pendingTimer = null;
       }
 
-      const activeRequest = pendingRequest;
+      const requestToRun = pendingRequest;
       pendingRequest = null;
       lastRequestStartedAt = now();
+      const controller = new AbortController();
+      activeRequest = { ...requestToRun, controller };
 
-      executeBaiduRequest(activeRequest.requestData)
+      executeBaiduRequest(requestToRun.requestData, controller.signal)
         .then((result) => {
-          cache.set(activeRequest.requestData.cacheKey, result.translatedText);
-          activeRequest.resolve(result);
+          cache.set(requestToRun.requestData.cacheKey, result.translatedText);
+          requestToRun.resolve(result);
         })
-        .catch(activeRequest.reject)
-        .finally(scheduleDrain);
+        .catch(requestToRun.reject)
+        .finally(() => {
+          if (activeRequest && activeRequest.controller === controller) {
+            activeRequest = null;
+          }
+          scheduleDrain();
+        });
     }
 
-    async function executeBaiduRequest(requestData) {
+    async function executeBaiduRequest(requestData, signal) {
       const salt = createSalt();
       const signSource = `${requestData.appId}${requestData.text}${salt}${requestData.appKey}`;
       const sign = md5(signSource);
@@ -175,9 +211,13 @@
           headers: {
             "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
           },
-          body: body.toString()
+          body: body.toString(),
+          signal
         });
       } catch (error) {
+        if (signal && signal.aborted) {
+          throw createTranslationError("REQUEST_CANCELLED", "翻译请求已取消");
+        }
         throw createTranslationError("NETWORK_ERROR", "网络请求失败，请稍后重试");
       }
 

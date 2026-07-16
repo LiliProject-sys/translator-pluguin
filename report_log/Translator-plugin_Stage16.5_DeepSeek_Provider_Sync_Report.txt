@@ -1,0 +1,78 @@
+﻿Translator-plugin Stage16.5 DeepSeek Provider Sync Check Report
+生成日期：2026-07-15
+项目目录：D:\Project_Experimental\Translator_Plugin
+
+1. 排查目标
+
+本阶段目标是检查 DeepSeek Provider 是否完整同步当前 Word Analysis Skill v6，并确认它与 Gemini Provider、content.js 前端渲染使用同一套 Word Analysis 结果结构。
+
+重点检查：
+- Quick 输出是否为 word / lemma / phonetic / partOfSpeech / meaning；
+- Detail 输出是否为 meaningInSentence / comparison；
+- detail prompt 是否包含最小信息支点原则；
+- comparison 是否只表达核心语义区别；
+- 是否仍把 contextualMeaning / contextReason / wordChoiceReason / academicMeaning 当作输出字段；
+- analysisMode、skillVersion 和 cache key 是否能区分 quick/detail 与 v6。
+
+2. 检查文件
+
+- deepseek-context-provider.js
+  已检查 quick/detail prompt、JSON 示例、response_format、max_tokens、analysisMode 传递、validateAnalysis 调用、返回结构、缓存 key 和 Sentence Translation 分支。
+
+- ai-context-skill.js
+  已确认当前 Skill 版本为 context-analysis-v6，Quick / Detail Schema 和本地校验仍是 Stage15 设计。
+
+- content.js
+  已确认前端按 resultType=contextAnalysis、analysisMode 和 analysis 字段渲染，不区分 Gemini 或 DeepSeek，能够同时消费两个 Provider 的同一返回结构。
+
+- tests/stage16_5-deepseek-provider-sync.test.js
+  新增 DeepSeek 同步检查测试。
+
+3. 问题原因
+
+本次排查未发现 DeepSeek Provider 仍使用旧版输出字段或旧版 Schema。
+
+用户看到的 challenge (challenging) 属于前端 lemma 展示格式：当 Provider 返回 lemma=challenge、用户原始选词为 challenging 时，content.js 会显示为 challenge (challenging)，用于同时提示词典原形和原始选词。这不是 DeepSeek 返回了错误 lemma，也不是旧 Prompt 残留。
+
+真正需要验证的是 DeepSeek quick 返回值中 lemma 是否为 challenge。新增测试已覆盖 challenging 样例，并确认合法输出为：
+- word: challenging
+- lemma: challenge
+- partOfSpeech: adj.
+
+4. 修改内容（如果有）
+
+本阶段没有修改 DeepSeek Provider、Gemini Provider、Word Analysis Skill v6、Sentence Translation、UI 或数据结构。
+
+新增内容：
+- tests/stage16_5-deepseek-provider-sync.test.js
+  覆盖 employed、reinforcing、exposed、challenging 四组样例，验证 DeepSeek quick/detail 返回结构、detail prompt、Schema、analysisMode、skillVersion、缓存行为和前端兼容性。
+
+- report_log/Translator-plugin_Stage16.5_DeepSeek_Provider_Sync_Report.txt
+  本报告。
+
+5. 测试结果
+
+已执行静态验证：
+- node --check deepseek-context-provider.js：通过；
+- node --check tests/stage16_5-deepseek-provider-sync.test.js：通过；
+- tests/stage16_5-deepseek-provider-sync.test.js：通过；
+- Stage6 至 Stage16.5 回归测试：通过；
+- manifest.json JSON 解析：通过；
+- git diff --check：通过，仅出现 Windows 换行提示。
+
+新增测试确认：
+- DeepSeek Quick 输出字段为 word / lemma / phonetic / partOfSpeech / meaning；
+- DeepSeek Detail 输出字段为 meaningInSentence / comparison；
+- challenging 的 lemma 为 challenge；
+- comparison 只接受 null 或 { word, difference }；
+- 旧字段 academicMeaning / contextualMeaning / contextReason / wordChoiceReason 会被本地校验拒绝；
+- DeepSeek 返回 resultType=contextAnalysis、skillVersion=context-analysis-v6，并带有正确 analysisMode；
+- cache key 逻辑包含 requestType、analysisMode 和 skillVersion；
+- content.js 使用通用 contextAnalysis 渲染路径，兼容 Gemini 与 DeepSeek。
+
+仍需真实 Chrome 人工验证：
+- DeepSeek 模式下选择 employed，确认 detail 显示 employ/apply 核心语义区别；
+- 选择 reinforcing，确认不强制生成 comparison；
+- 选择 exposed，确认 meaningInSentence 简洁；
+- 选择 challenging，确认浮窗显示 challenge (challenging)，且不出现旧字段；
+- 回归 Gemini、Sentence Translation、生词保存、popup 和浮窗 resize。

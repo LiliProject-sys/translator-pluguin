@@ -1,4 +1,7 @@
 const SENTENCE_BOUNDARY_PATTERN = /[.?!;]/;
+const SINGLE_TOKEN_ABBREVIATIONS = new Set(["fig", "eq", "ref", "sec", "no", "vs"]);
+const MULTI_PERIOD_ABBREVIATIONS = ["e.g.", "i.e."];
+const MULTI_TOKEN_ABBREVIATIONS = ["et al."];
 const TOAST_ID = "web-vocabulary-collector-toast";
 const FLOATING_PANEL_ID = "translator-plugin-selection-panel";
 const FLOATING_PANEL_STYLE_ID = "translator-plugin-selection-panel-style";
@@ -6,10 +9,16 @@ const FLOATING_PANEL_MARGIN = 10;
 
 let currentSelectionSnapshot = null;
 let currentSelectionRect = null;
+let currentPanelViewportPosition = null;
+let currentQuickRequestId = "";
+let currentDetailRequestId = "";
+let currentSelectionRequestType = "wordAnalysis";
 let selectionPanel = null;
+let selectionPanelResizeObserver = null;
 let mouseupTimer = null;
 let panelPointerDown = false;
-let selectionRequestId = 0;
+let currentSelectionId = 0;
+let detailAnalysisRequestId = 0;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !message.type) {
@@ -56,13 +65,21 @@ function getSelectionContext() {
   };
 }
 
-document.addEventListener("mouseup", () => {
+document.addEventListener("mouseup", (event) => {
+  const mouseupInsidePanel = isEventInsideSelectionPanel(event);
+  if (mouseupInsidePanel || panelPointerDown) {
+    window.setTimeout(() => {
+      panelPointerDown = false;
+    }, 0);
+    return;
+  }
+
   window.clearTimeout(mouseupTimer);
   mouseupTimer = window.setTimeout(showPanelForCurrentSelection, 80);
 });
 
 document.addEventListener("mousedown", (event) => {
-  if (selectionPanel && !selectionPanel.contains(event.target)) {
+  if (selectionPanel && !isEventInsideSelectionPanel(event)) {
     closeSelectionPanel();
   }
 }, true);
@@ -85,8 +102,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-window.addEventListener("scroll", closeSelectionPanel, true);
-window.addEventListener("resize", closeSelectionPanel);
+window.addEventListener("resize", keepSelectionPanelInViewport);
 
 function showPanelForCurrentSelection() {
   const selection = window.getSelection();
@@ -105,14 +121,18 @@ function showPanelForCurrentSelection() {
     return;
   }
 
+  cancelLanguageRequests(getCurrentLanguageRequestIds());
   currentSelectionSnapshot = getSelectionContext();
   currentSelectionRect = copyRect(rect);
-  const requestId = ++selectionRequestId;
+  const selectionId = ++currentSelectionId;
+  currentSelectionRequestType = detectSelectionRequestType(currentSelectionSnapshot.word);
+  currentQuickRequestId = `selection-${selectionId}-quick`;
+  currentDetailRequestId = "";
   createOrUpdateSelectionPanel(currentSelectionSnapshot.word);
   positionSelectionPanel(currentSelectionRect);
-  checkCurrentSelectionStatus(requestId);
-  updateLanguageLoadingLabel(requestId);
-  requestTranslation(requestId);
+  checkCurrentSelectionStatus(selectionId);
+  updateLanguageLoadingLabel(selectionId);
+  requestTranslation(selectionId);
 }
 
 function getUsefulSelectionRect(range) {
@@ -137,6 +157,12 @@ function createOrUpdateSelectionPanel(selectedText) {
       panelPointerDown = true;
       event.stopPropagation();
     });
+    selectionPanel.addEventListener("mouseup", (event) => {
+      event.stopPropagation();
+      window.setTimeout(() => {
+        panelPointerDown = false;
+      }, 0);
+    });
     selectionPanel.addEventListener("click", (event) => {
       event.stopPropagation();
       window.setTimeout(() => {
@@ -144,6 +170,7 @@ function createOrUpdateSelectionPanel(selectedText) {
       }, 0);
     });
     document.documentElement.appendChild(selectionPanel);
+    observeSelectionPanelResize();
   }
 
   selectionPanel.innerHTML = "";
@@ -182,7 +209,7 @@ function createOrUpdateSelectionPanel(selectedText) {
   selectionPanel.append(textElement, translationElement, statusElement, actions);
 }
 
-function checkCurrentSelectionStatus(requestId) {
+function checkCurrentSelectionStatus(selectionId) {
   const snapshot = currentSelectionSnapshot;
 
   chrome.runtime.sendMessage({
@@ -191,7 +218,7 @@ function checkCurrentSelectionStatus(requestId) {
   }, (response) => {
     const runtimeError = chrome.runtime.lastError;
 
-    if (requestId !== selectionRequestId || !selectionPanel || snapshot !== currentSelectionSnapshot) {
+    if (selectionId !== currentSelectionId || !selectionPanel || snapshot !== currentSelectionSnapshot) {
       return;
     }
 
@@ -211,8 +238,9 @@ function checkCurrentSelectionStatus(requestId) {
   });
 }
 
-function requestTranslation(requestId) {
+function requestTranslation(selectionId) {
   const snapshot = currentSelectionSnapshot;
+  const quickRequestId = currentQuickRequestId;
 
   setLanguageLoadingState("正在处理…", true);
 
@@ -223,18 +251,25 @@ function requestTranslation(requestId) {
       contextSentence: snapshot && snapshot.contextSentence,
       pageTitle: snapshot && snapshot.pageTitle,
       sourceLanguage: "en",
-      targetLanguage: "zh-CN"
+      targetLanguage: "zh-CN",
+      requestType: currentSelectionRequestType,
+      analysisMode: "quick",
+      requestId: quickRequestId,
+      selectionId
     }
   }, (response) => {
     const runtimeError = chrome.runtime.lastError;
 
-    if (requestId !== selectionRequestId || !selectionPanel || snapshot !== currentSelectionSnapshot) {
+    if (selectionId !== currentSelectionId
+      || quickRequestId !== currentQuickRequestId
+      || !selectionPanel
+      || snapshot !== currentSelectionSnapshot) {
       return;
     }
 
     if (runtimeError) {
       console.error("Failed to process selected text:", runtimeError.message);
-      renderLanguageResult({ errorMessage: "处理失败，请稍后重试" }, requestId);
+      renderLanguageResult({ errorMessage: "处理失败，请稍后重试" }, selectionId);
       return;
     }
 
@@ -246,17 +281,86 @@ function requestTranslation(requestId) {
       renderLanguageResult({
         errorMessage: response && response.message ? response.message : "处理失败，请稍后重试",
         requiresConfiguration: !!(response && response.requiresConfiguration)
-      }, requestId);
+      }, selectionId);
       return;
     }
 
-    renderLanguageResult(response, requestId);
+    maybeStoreQuickAnalysisOnSnapshot(response, selectionId, quickRequestId, snapshot);
+    maybeStoreContextTranslationOnSnapshot(response, selectionId, quickRequestId, snapshot);
+    renderLanguageResult(response, selectionId);
   });
 }
 
-function updateLanguageLoadingLabel(requestId) {
+function maybeStoreQuickAnalysisOnSnapshot(response, selectionId, quickRequestId, snapshot) {
+  if (!response
+    || response.resultType !== "contextAnalysis"
+    || response.analysisMode !== "quick"
+    || !response.analysis
+    || currentSelectionRequestType !== "wordAnalysis"
+    || selectionId !== currentSelectionId
+    || quickRequestId !== currentQuickRequestId
+    || !selectionPanel
+    || snapshot !== currentSelectionSnapshot) {
+    return;
+  }
+
+  ["lemma", "phonetic", "partOfSpeech", "meaning"].forEach((field) => {
+    const value = normalizeWhitespace(response.analysis[field]);
+    if (value) {
+      snapshot[field] = value;
+    }
+  });
+}
+
+function maybeStoreContextTranslationOnSnapshot(response, selectionId, quickRequestId, snapshot) {
+  if (!response
+    || currentSelectionRequestType !== "sentenceTranslation"
+    || selectionId !== currentSelectionId
+    || quickRequestId !== currentQuickRequestId
+    || !selectionPanel
+    || snapshot !== currentSelectionSnapshot
+    || !isTranslationResultForSnapshot(response, snapshot)) {
+    return;
+  }
+
+  let contextTranslation = "";
+  if (response.resultType === "sentenceTranslation") {
+    contextTranslation = normalizeWhitespace(response.translation);
+  } else if (response.resultType === "quickTranslation") {
+    contextTranslation = normalizeWhitespace(response.translatedText);
+  }
+
+  if (contextTranslation) {
+    snapshot.contextTranslation = contextTranslation;
+  }
+}
+
+function isTranslationResultForSnapshot(response, snapshot) {
+  if (!snapshot) {
+    return false;
+  }
+
+  const contextSentence = normalizeWhitespace(snapshot.contextSentence);
+  const selectedText = normalizeWhitespace(snapshot.word);
+  if (!contextSentence || !selectedText) {
+    return false;
+  }
+
+  if (response.resultType === "quickTranslation") {
+    return normalizeForLooseCompare(contextSentence) === normalizeForLooseCompare(selectedText);
+  }
+
+  return response.resultType === "sentenceTranslation";
+}
+
+function updateLanguageLoadingLabel(selectionId) {
+  if (currentSelectionRequestType === "sentenceTranslation") {
+    setLanguageLoadingState("正在翻译句子…");
+    return;
+  }
+
   chrome.runtime.sendMessage({ type: "GET_ACTIVE_LANGUAGE_MODE" }, (response) => {
-    if (requestId !== selectionRequestId || !selectionPanel) {
+    if (selectionId !== currentSelectionId || !selectionPanel) {
       return;
     }
 
@@ -284,12 +388,12 @@ function setLanguageLoadingState(message, force) {
     return;
   }
 
-  translationElement.classList.remove("is-error", "is-analysis");
+  translationElement.classList.remove("is-error", "is-analysis", "is-sentence-translation");
   translationElement.classList.add("is-loading");
   translationElement.textContent = message;
 }
 
-function renderLanguageResult(result, requestId) {
+function renderLanguageResult(result, selectionId) {
   if (!selectionPanel) {
     return;
   }
@@ -300,11 +404,13 @@ function renderLanguageResult(result, requestId) {
     return;
   }
 
-  translationElement.classList.remove("is-loading", "is-error", "is-analysis");
+  translationElement.classList.remove("is-loading", "is-error", "is-analysis", "is-sentence-translation");
   translationElement.innerHTML = "";
 
-  if (result && result.resultType === "contextAnalysis" && result.analysis) {
-    renderContextAnalysis(translationElement, result.analysis);
+  if (result && result.resultType === "sentenceTranslation" && result.translation) {
+    renderSentenceTranslation(translationElement, result);
+  } else if (result && result.resultType === "contextAnalysis" && result.analysis) {
+    renderContextAnalysis(translationElement, result.analysis, result.analysisMode || "quick", selectionId);
   } else if (result && result.translatedText) {
     translationElement.textContent = result.translatedText;
   } else {
@@ -319,7 +425,7 @@ function renderLanguageResult(result, requestId) {
     retryButton.type = "button";
     retryButton.className = "translator-plugin-panel-settings";
     retryButton.textContent = "重试";
-    retryButton.addEventListener("click", () => requestTranslation(requestId));
+    retryButton.addEventListener("click", () => requestTranslation(selectionId));
     translationElement.appendChild(retryButton);
 
     if (result && result.requiresConfiguration) {
@@ -332,19 +438,46 @@ function renderLanguageResult(result, requestId) {
     }
   }
 
-  if (currentSelectionRect) {
-    positionSelectionPanel(currentSelectionRect);
-  }
+  keepSelectionPanelInViewport();
 }
 
-function renderContextAnalysis(container, analysis) {
+function renderSentenceTranslation(container, result) {
+  container.classList.add("is-analysis", "is-sentence-translation");
+
+  const translationElement = document.createElement("div");
+  translationElement.className = "translator-plugin-sentence-translation";
+  translationElement.textContent = result.translation;
+  container.appendChild(translationElement);
+
+  if (!result.keyTerm) {
+    return;
+  }
+
+  const keyTermElement = document.createElement("div");
+  keyTermElement.className = "translator-plugin-sentence-key-term";
+  const keyTermLabel = document.createElement("span");
+  keyTermLabel.textContent = "关键术语";
+  const keyTermValue = document.createElement("span");
+  keyTermValue.textContent = `${result.keyTerm.term}：${result.keyTerm.meaning}`;
+  keyTermElement.append(keyTermLabel, keyTermValue);
+  container.appendChild(keyTermElement);
+}
+
+function renderContextAnalysis(container, analysis, analysisMode, selectionId) {
   container.classList.add("is-analysis");
+  if (analysisMode === "detail") {
+    renderDetailAnalysis(container, analysis);
+    return;
+  }
+
+  const selectedWord = currentSelectionSnapshot && currentSelectionSnapshot.word
+    ? currentSelectionSnapshot.word
+    : analysis.word;
   const rows = [
-    ["单词", analysis.lemma],
+    ["单词", formatLemmaDisplay(analysis.lemma, selectedWord)],
     ["音标", analysis.phonetic],
     ["词性", analysis.partOfSpeech],
-    ["常见含义", analysis.commonMeaning],
-    ["论文中含义", analysis.contextualMeaning]
+    ["含义", analysis.meaning]
   ];
 
   rows.forEach(([label, value], index) => {
@@ -365,6 +498,206 @@ function renderContextAnalysis(container, analysis) {
     row.append(labelElement, valueElement);
     container.appendChild(row);
   });
+
+  const detailButton = document.createElement("button");
+  detailButton.type = "button";
+  detailButton.className = "translator-plugin-panel-detail";
+  detailButton.textContent = "详细解释";
+  detailButton.addEventListener("click", () => requestDetailedAnalysis(selectionId, detailButton));
+  container.appendChild(detailButton);
+}
+
+function renderDetailAnalysis(container, analysis) {
+  const rows = [
+    ["当前语境", analysis.meaningInSentence]
+  ];
+
+  if (analysis.comparison) {
+    rows.push([
+      "近义词区别",
+      formatComparisonDisplay(analysis.comparison)
+    ]);
+  }
+
+  rows.forEach(([label, value], index) => {
+    const row = document.createElement("div");
+    row.className = "translator-plugin-analysis-row is-detail";
+    if (index === 0) {
+      row.classList.add("is-contextual-meaning");
+    } else {
+      row.classList.add("is-separated-detail");
+    }
+
+    const labelElement = document.createElement("span");
+    labelElement.className = "translator-plugin-analysis-label";
+    labelElement.textContent = label;
+
+    const valueElement = document.createElement("span");
+    valueElement.className = "translator-plugin-analysis-value";
+    valueElement.textContent = value || "-";
+
+    row.append(labelElement, valueElement);
+    container.appendChild(row);
+  });
+}
+
+function formatComparisonDisplay(comparison) {
+  if (!comparison) {
+    return "";
+  }
+
+  const selectedWord = currentSelectionSnapshot && currentSelectionSnapshot.word
+    ? normalizeWhitespace(currentSelectionSnapshot.word)
+    : "";
+  const currentWord = selectedWord || "当前词";
+  return [
+    `${currentWord} vs ${comparison.word}`,
+    comparison.difference
+  ].filter(Boolean).join("\n");
+}
+
+function requestDetailedAnalysis(selectionId, button) {
+  const snapshot = currentSelectionSnapshot;
+  if (!snapshot || selectionId !== currentSelectionId) {
+    return;
+  }
+
+  const analysisRequestId = ++detailAnalysisRequestId;
+  currentDetailRequestId = `selection-${selectionId}-detail-${analysisRequestId}`;
+  console.info("DETAIL_REQUEST_START", {
+    selectionId,
+    analysisRequestId
+  });
+
+  button.disabled = true;
+  button.textContent = "正在详细解释…";
+
+  chrome.runtime.sendMessage({
+    type: "TRANSLATE_TEXT",
+    payload: {
+      text: snapshot.word,
+      contextSentence: snapshot.contextSentence,
+      pageTitle: snapshot.pageTitle,
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN",
+      requestType: "wordAnalysis",
+      analysisMode: "detail",
+      requestId: currentDetailRequestId,
+      selectionId,
+      analysisRequestId,
+      userQuestion: "请用最简洁的信息说明该词在当前句子里的含义；只有近义词语义区别明显时才补充比较。"
+    }
+  }, (response) => {
+    const runtimeError = chrome.runtime.lastError;
+
+    console.info("DETAIL_RESPONSE_RECEIVED", {
+      selectionId,
+      analysisRequestId,
+      status: runtimeError ? "runtime_error" : response && response.status ? response.status : "missing"
+    });
+
+    if (selectionId !== currentSelectionId) {
+      logDiscardedDetailResponse(selectionId, analysisRequestId, "old_selection");
+      return;
+    }
+
+    if (analysisRequestId !== detailAnalysisRequestId) {
+      logDiscardedDetailResponse(selectionId, analysisRequestId, "old_request");
+      return;
+    }
+
+    if (!selectionPanel || snapshot !== currentSelectionSnapshot) {
+      logDiscardedDetailResponse(selectionId, analysisRequestId, "panel_closed");
+      return;
+    }
+
+    if (runtimeError) {
+      console.error("Failed to request detailed context analysis:", runtimeError.message);
+      renderDetailError(button, "详细解释加载失败，请重试", selectionId);
+      return;
+    }
+
+    if (!response || response.status !== "ok" || response.resultType !== "contextAnalysis") {
+      console.error("Detailed context analysis failed:", {
+        code: response && response.errorCode ? response.errorCode : "UNKNOWN_ERROR",
+        type: "LanguageResponseError"
+      });
+      renderDetailError(button, "详细解释加载失败，请重试", selectionId);
+      return;
+    }
+
+    const translationElement = selectionPanel.querySelector(".translator-plugin-panel-translation");
+    if (!translationElement) {
+      return;
+    }
+
+    const detailSection = document.createElement("div");
+    detailSection.className = "translator-plugin-detail-section";
+    renderDetailAnalysis(detailSection, response.analysis);
+    const staleError = selectionPanel.querySelector(".translator-plugin-detail-error");
+    if (staleError) {
+      staleError.remove();
+    }
+    button.replaceWith(detailSection);
+    console.info("DETAIL_RESPONSE_APPLIED", {
+      selectionId,
+      analysisRequestId
+    });
+
+    keepSelectionPanelInViewport();
+  });
+}
+
+function logDiscardedDetailResponse(selectionId, analysisRequestId, reason) {
+  console.info("DETAIL_RESPONSE_DISCARDED", {
+    selectionId,
+    analysisRequestId,
+    reason
+  });
+}
+
+function renderDetailError(button, message, selectionId) {
+  let errorElement = selectionPanel && selectionPanel.querySelector(".translator-plugin-detail-error");
+  if (!errorElement && selectionPanel) {
+    errorElement = document.createElement("div");
+    errorElement.className = "translator-plugin-detail-error";
+    button.insertAdjacentElement("beforebegin", errorElement);
+  }
+  if (errorElement) {
+    errorElement.textContent = message;
+  }
+
+  const retryButton = button.cloneNode(true);
+  retryButton.disabled = false;
+  retryButton.textContent = "重试详细解释";
+  retryButton.addEventListener("click", () => requestDetailedAnalysis(selectionId, retryButton));
+  button.replaceWith(retryButton);
+
+  keepSelectionPanelInViewport();
+}
+
+function formatLemmaDisplay(lemma, selectedWord) {
+  const normalizedLemma = normalizeWhitespace(lemma);
+  const normalizedWord = normalizeWhitespace(selectedWord);
+  if (!normalizedLemma) {
+    return normalizedWord || "-";
+  }
+  if (!normalizedWord || normalizedLemma.toLocaleLowerCase() === normalizedWord.toLocaleLowerCase()) {
+    return normalizedLemma;
+  }
+  return `${normalizedLemma} (${normalizedWord})`;
+}
+
+function detectSelectionRequestType(selectedText) {
+  const text = normalizeWhitespace(selectedText);
+  if (!text) {
+    return "wordAnalysis";
+  }
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  return /[.?!;]/.test(text) || wordCount > 10 || text.length > 80
+    ? "sentenceTranslation"
+    : "wordAnalysis";
 }
 
 function openTranslationOptions() {
@@ -414,9 +747,7 @@ function renderSelectionStatus(status) {
     configureSaveButton(addButton, "加入生词本", true);
   }
 
-  if (currentSelectionRect) {
-    positionSelectionPanel(currentSelectionRect);
-  }
+  keepSelectionPanelInViewport();
 }
 
 function configureSaveButton(button, label, enabled) {
@@ -433,16 +764,14 @@ function positionSelectionPanel(selectionRect) {
   selectionPanel.style.left = "0px";
   selectionPanel.style.top = "0px";
   selectionPanel.style.visibility = "hidden";
-  selectionPanel.style.display = "block";
+  selectionPanel.style.display = "flex";
 
   const panelRect = selectionPanel.getBoundingClientRect();
   const viewportWidth = document.documentElement.clientWidth;
   const viewportHeight = document.documentElement.clientHeight;
-  const scrollX = window.scrollX || window.pageXOffset;
-  const scrollY = window.scrollY || window.pageYOffset;
 
   let left = selectionRect.left + (selectionRect.width / 2) - (panelRect.width / 2);
-  left = clamp(left, FLOATING_PANEL_MARGIN, viewportWidth - panelRect.width - FLOATING_PANEL_MARGIN);
+  left = clampPanelCoordinate(left, panelRect.width, viewportWidth);
 
   const spaceAbove = selectionRect.top;
   const spaceBelow = viewportHeight - selectionRect.bottom;
@@ -453,12 +782,67 @@ function positionSelectionPanel(selectionRect) {
   } else if (spaceBelow >= panelRect.height + FLOATING_PANEL_MARGIN) {
     top = selectionRect.bottom + FLOATING_PANEL_MARGIN;
   } else {
-    top = clamp(selectionRect.top - panelRect.height - FLOATING_PANEL_MARGIN, FLOATING_PANEL_MARGIN, viewportHeight - panelRect.height - FLOATING_PANEL_MARGIN);
+    top = clampPanelCoordinate(
+      selectionRect.top - panelRect.height - FLOATING_PANEL_MARGIN,
+      panelRect.height,
+      viewportHeight
+    );
   }
 
-  selectionPanel.style.left = `${Math.round(left + scrollX)}px`;
-  selectionPanel.style.top = `${Math.round(top + scrollY)}px`;
+  top = clampPanelCoordinate(top, panelRect.height, viewportHeight);
+  currentPanelViewportPosition = { left, top };
+  applyPanelViewportPosition(left, top);
   selectionPanel.style.visibility = "visible";
+}
+
+function keepSelectionPanelInViewport() {
+  if (!selectionPanel || !currentPanelViewportPosition) {
+    return;
+  }
+
+  const panelRect = selectionPanel.getBoundingClientRect();
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = document.documentElement.clientHeight;
+  const left = clampPanelCoordinate(currentPanelViewportPosition.left, panelRect.width, viewportWidth);
+  const top = clampPanelCoordinate(currentPanelViewportPosition.top, panelRect.height, viewportHeight);
+
+  currentPanelViewportPosition = { left, top };
+  applyPanelViewportPosition(left, top);
+}
+
+function observeSelectionPanelResize() {
+  disconnectSelectionPanelResizeObserver();
+
+  if (!selectionPanel || typeof ResizeObserver !== "function") {
+    return;
+  }
+
+  selectionPanelResizeObserver = new ResizeObserver(() => {
+    window.requestAnimationFrame(keepSelectionPanelInViewport);
+  });
+  selectionPanelResizeObserver.observe(selectionPanel);
+}
+
+function disconnectSelectionPanelResizeObserver() {
+  if (!selectionPanelResizeObserver) {
+    return;
+  }
+
+  selectionPanelResizeObserver.disconnect();
+  selectionPanelResizeObserver = null;
+}
+
+function applyPanelViewportPosition(left, top) {
+  if (!selectionPanel) {
+    return;
+  }
+  selectionPanel.style.left = `${Math.round(left)}px`;
+  selectionPanel.style.top = `${Math.round(top)}px`;
+}
+
+function clampPanelCoordinate(value, elementSize, viewportSize) {
+  const maximum = Math.max(FLOATING_PANEL_MARGIN, viewportSize - elementSize - FLOATING_PANEL_MARGIN);
+  return clamp(value, FLOATING_PANEL_MARGIN, maximum);
 }
 
 function saveCurrentSelection(button) {
@@ -475,10 +859,11 @@ function saveCurrentSelection(button) {
   button.disabled = true;
   button.dataset.saveEnabled = "false";
   button.textContent = "保存中...";
+  const snapshotForSave = currentSelectionSnapshot;
 
   chrome.runtime.sendMessage({
     type: "SAVE_VOCABULARY_ENTRY",
-    entry: currentSelectionSnapshot
+    entry: snapshotForSave
   }, (response) => {
     if (chrome.runtime.lastError) {
       console.error("Failed to save vocabulary entry:", chrome.runtime.lastError.message);
@@ -493,8 +878,58 @@ function saveCurrentSelection(button) {
     }
 
     const message = response.status === "duplicate" ? "已保存" : "已加入";
+    maybeRequestVocabularyContextTranslation(response, snapshotForSave);
     updatePanelStatus(button, message, false);
   });
+}
+
+function maybeRequestVocabularyContextTranslation(response, snapshot) {
+  if (!response
+    || !response.entryId
+    || response.hasContextTranslation
+    || !shouldRequestVocabularyContextTranslation(snapshot)) {
+    return;
+  }
+
+  chrome.runtime.sendMessage({
+    type: "GENERATE_VOCABULARY_CONTEXT_TRANSLATION",
+    entry: {
+      entryId: response.entryId,
+      word: snapshot.word,
+      contextSentence: snapshot.contextSentence,
+      pageUrl: snapshot.pageUrl
+    }
+  }, (translationResponse) => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to request vocabulary context translation:", chrome.runtime.lastError.message);
+      return;
+    }
+
+    if (!translationResponse || translationResponse.status === "error") {
+      console.error("Vocabulary context translation failed:", translationResponse && translationResponse.message
+        ? translationResponse.message
+        : "Unknown error");
+    }
+  });
+}
+
+function shouldRequestVocabularyContextTranslation(snapshot) {
+  if (!snapshot) {
+    return false;
+  }
+
+  const contextSentence = normalizeWhitespace(snapshot.contextSentence);
+  if (!contextSentence) {
+    return false;
+  }
+
+  const word = normalizeWhitespace(snapshot.word);
+  const normalizedWord = normalizeForLooseCompare(word);
+  const normalizedContext = normalizeForLooseCompare(contextSentence);
+  const wordCount = normalizedContext.split(/\s+/).filter(Boolean).length;
+  const hasSentenceBoundary = /[.?!;]/.test(contextSentence);
+
+  return !(normalizedWord && normalizedWord === normalizedContext && wordCount <= 3 && !hasSentenceBoundary);
 }
 
 function updatePanelStatus(button, message, isError) {
@@ -507,15 +942,54 @@ function updatePanelStatus(button, message, isError) {
 }
 
 function closeSelectionPanel() {
-  selectionRequestId += 1;
+  const requestIds = getCurrentLanguageRequestIds();
+  currentSelectionId += 1;
+  detailAnalysisRequestId += 1;
   currentSelectionSnapshot = null;
   currentSelectionRect = null;
+  currentPanelViewportPosition = null;
+  currentQuickRequestId = "";
+  currentDetailRequestId = "";
+  currentSelectionRequestType = "wordAnalysis";
   panelPointerDown = false;
+
+  disconnectSelectionPanelResizeObserver();
 
   if (selectionPanel) {
     selectionPanel.remove();
     selectionPanel = null;
   }
+
+  cancelLanguageRequests(requestIds);
+}
+
+function getCurrentLanguageRequestIds() {
+  return [currentQuickRequestId, currentDetailRequestId].filter(Boolean);
+}
+
+function cancelLanguageRequests(requestIds) {
+  if (!Array.isArray(requestIds) || requestIds.length === 0) {
+    return;
+  }
+
+  chrome.runtime.sendMessage({
+    type: "CANCEL_LANGUAGE_REQUEST",
+    requestIds
+  }, () => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to cancel language request:", chrome.runtime.lastError.message);
+    }
+  });
+}
+
+function isEventInsideSelectionPanel(event) {
+  if (!selectionPanel || !event) {
+    return false;
+  }
+  if (typeof event.composedPath === "function") {
+    return event.composedPath().includes(selectionPanel);
+  }
+  return !!(event.target && selectionPanel.contains(event.target));
 }
 
 function injectSelectionPanelStyles() {
@@ -527,12 +1001,17 @@ function injectSelectionPanelStyles() {
   style.id = FLOATING_PANEL_STYLE_ID;
   style.textContent = `
     #${FLOATING_PANEL_ID}.translator-plugin-panel {
-      position: absolute;
+      position: fixed;
       z-index: 2147483000;
-      width: max-content;
-      max-width: min(340px, calc(100vw - 20px));
-      max-height: calc(100vh - 20px);
-      overflow-y: auto;
+      width: min(360px, calc(100vw - 24px));
+      min-width: 320px;
+      min-height: 220px;
+      max-width: calc(100vw - 24px);
+      max-height: calc(100vh - 24px);
+      display: flex;
+      flex-direction: column;
+      resize: both;
+      overflow: hidden;
       padding: 10px;
       border: 1px solid rgba(148, 163, 184, 0.55);
       border-radius: 10px;
@@ -546,7 +1025,8 @@ function injectSelectionPanelStyles() {
     }
 
     #${FLOATING_PANEL_ID} .translator-plugin-panel-text {
-      max-width: 300px;
+      width: 100%;
+      min-width: 0;
       margin: 0 0 8px;
       overflow: hidden;
       color: #1f2937;
@@ -556,7 +1036,9 @@ function injectSelectionPanelStyles() {
     }
 
     #${FLOATING_PANEL_ID} .translator-plugin-panel-translation {
-      max-width: 300px;
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
       margin: 0 0 8px;
       padding: 7px 8px;
       border-left: 3px solid #60a5fa;
@@ -565,8 +1047,10 @@ function injectSelectionPanelStyles() {
       background: #f8fafc;
       font-size: 13px;
       line-height: 1.5;
+      overflow: auto;
       overflow-wrap: anywhere;
       white-space: normal;
+      box-sizing: border-box;
     }
 
     #${FLOATING_PANEL_ID} .translator-plugin-panel-translation.is-loading {
@@ -585,6 +1069,33 @@ function injectSelectionPanelStyles() {
       padding: 8px 9px;
     }
 
+    #${FLOATING_PANEL_ID} .translator-plugin-panel-translation.is-sentence-translation {
+      border-left-color: #0f766e;
+    }
+
+    #${FLOATING_PANEL_ID} .translator-plugin-sentence-translation {
+      color: #134e4a;
+      font-size: 14px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+
+    #${FLOATING_PANEL_ID} .translator-plugin-sentence-key-term {
+      display: grid;
+      grid-template-columns: 64px minmax(0, 1fr);
+      gap: 8px;
+      margin-top: 9px;
+      padding-top: 8px;
+      border-top: 1px solid #d1fae5;
+      color: #334155;
+      overflow-wrap: anywhere;
+    }
+
+    #${FLOATING_PANEL_ID} .translator-plugin-sentence-key-term > span:first-child {
+      color: #0f766e;
+      font-weight: 600;
+    }
+
     #${FLOATING_PANEL_ID} .translator-plugin-analysis-row {
       display: grid;
       grid-template-columns: 76px minmax(0, 1fr);
@@ -597,6 +1108,17 @@ function injectSelectionPanelStyles() {
       overflow-y: auto;
     }
 
+    #${FLOATING_PANEL_ID} .translator-plugin-analysis-row.is-detail {
+      grid-template-columns: 72px minmax(0, 1fr);
+      padding: 3px 0;
+    }
+
+    #${FLOATING_PANEL_ID} .translator-plugin-analysis-row.is-separated-detail {
+      margin-top: 7px;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 8px;
+    }
+
     #${FLOATING_PANEL_ID} .translator-plugin-analysis-label {
       color: #64748b;
       font-size: 12px;
@@ -607,6 +1129,7 @@ function injectSelectionPanelStyles() {
       min-width: 0;
       color: #1f2937;
       overflow-wrap: anywhere;
+      white-space: pre-wrap;
     }
 
     #${FLOATING_PANEL_ID} .translator-plugin-panel-settings {
@@ -622,8 +1145,41 @@ function injectSelectionPanelStyles() {
       font-weight: 600;
     }
 
+    #${FLOATING_PANEL_ID} .translator-plugin-panel-detail {
+      display: inline-block;
+      width: max-content;
+      min-height: 28px;
+      margin: 8px 7px 0 0;
+      border: 1px solid #16a34a;
+      padding: 4px 9px;
+      color: #166534;
+      background: #ffffff;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    #${FLOATING_PANEL_ID} .translator-plugin-panel-detail:disabled {
+      cursor: default;
+      opacity: 0.78;
+    }
+
+    #${FLOATING_PANEL_ID} .translator-plugin-detail-section {
+      margin-top: 8px;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 8px;
+      overflow: visible;
+    }
+
+    #${FLOATING_PANEL_ID} .translator-plugin-detail-error {
+      margin-top: 8px;
+      color: #b91c1c;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
     #${FLOATING_PANEL_ID} .translator-plugin-panel-status {
-      max-width: 300px;
+      width: 100%;
+      min-width: 0;
       margin: 0 0 8px;
       color: #475569;
       font-size: 12px;
@@ -738,15 +1294,15 @@ function extractSentence(text, selectionStart, selectionEnd) {
   let sentenceStart = safeStart;
   let sentenceEnd = safeEnd;
 
-  while (sentenceStart > 0 && !SENTENCE_BOUNDARY_PATTERN.test(cleanText.charAt(sentenceStart - 1))) {
+  while (sentenceStart > 0 && !isSentenceBoundary(cleanText, sentenceStart - 1)) {
     sentenceStart -= 1;
   }
 
-  while (sentenceEnd < cleanText.length && !SENTENCE_BOUNDARY_PATTERN.test(cleanText.charAt(sentenceEnd))) {
+  while (sentenceEnd < cleanText.length && !isSentenceBoundary(cleanText, sentenceEnd)) {
     sentenceEnd += 1;
   }
 
-  if (sentenceEnd < cleanText.length && SENTENCE_BOUNDARY_PATTERN.test(cleanText.charAt(sentenceEnd))) {
+  if (sentenceEnd < cleanText.length && isSentenceBoundary(cleanText, sentenceEnd)) {
     sentenceEnd += 1;
   }
 
@@ -754,8 +1310,139 @@ function extractSentence(text, selectionStart, selectionEnd) {
   return sentence || cleanText.slice(Math.max(0, safeStart - 120), Math.min(cleanText.length, safeEnd + 120)).trim();
 }
 
+function isSentenceBoundary(text, index) {
+  const character = text.charAt(index);
+  if (!SENTENCE_BOUNDARY_PATTERN.test(character)) {
+    return false;
+  }
+
+  if (character === ".") {
+    return !isDecimalPoint(text, index) && !isProtectedAbbreviationPeriod(text, index);
+  }
+
+  return true;
+}
+
+function isDecimalPoint(text, index) {
+  return text.charAt(index) === "."
+    && isAsciiDigit(text.charAt(index - 1))
+    && isAsciiDigit(text.charAt(index + 1));
+}
+
+function isProtectedAbbreviationPeriod(text, index) {
+  return isMultiPeriodAbbreviationPeriod(text, index)
+    || isMultiTokenAbbreviationPeriod(text, index)
+    || isSingleTokenAbbreviationPeriod(text, index);
+}
+
+function isMultiPeriodAbbreviationPeriod(text, index) {
+  const lowerText = text.toLocaleLowerCase();
+  return MULTI_PERIOD_ABBREVIATIONS.some((abbreviation) => {
+    let searchStart = Math.max(0, index - abbreviation.length + 1);
+    while (searchStart <= index) {
+      const foundAt = lowerText.indexOf(abbreviation, searchStart);
+      if (foundAt === -1 || foundAt > index) {
+        return false;
+      }
+
+      const foundEnd = foundAt + abbreviation.length;
+      if (index < foundEnd
+        && text.charAt(index) === "."
+        && isTokenBoundary(text.charAt(foundAt - 1))
+        && shouldProtectAbbreviationAt(text, foundAt, foundEnd, abbreviation)) {
+        return true;
+      }
+
+      searchStart = foundAt + 1;
+    }
+    return false;
+  });
+}
+
+function isMultiTokenAbbreviationPeriod(text, index) {
+  const lowerText = text.toLocaleLowerCase();
+  return MULTI_TOKEN_ABBREVIATIONS.some((abbreviation) => {
+    const start = index - abbreviation.length + 1;
+    const end = index + 1;
+    return start >= 0
+      && lowerText.slice(start, end) === abbreviation
+      && isTokenBoundary(text.charAt(start - 1))
+      && shouldProtectAbbreviationAt(text, start, end, abbreviation);
+  });
+}
+
+function isSingleTokenAbbreviationPeriod(text, index) {
+  const tokenStart = findTokenStart(text, index - 1);
+  const token = text.slice(tokenStart, index).toLocaleLowerCase();
+  if (!SINGLE_TOKEN_ABBREVIATIONS.has(token) || !isTokenBoundary(text.charAt(tokenStart - 1))) {
+    return false;
+  }
+
+  return shouldProtectAbbreviationAt(text, tokenStart, index + 1, `${token}.`);
+}
+
+function shouldProtectAbbreviationAt(text, start, end, abbreviation) {
+  const nextSignificantIndex = findNextNonSpaceIndex(text, end);
+  if (nextSignificantIndex === -1) {
+    return false;
+  }
+
+  const key = normalizeAbbreviationKey(abbreviation);
+  if (key === "fig." || key === "eq." || key === "ref." || key === "sec." || key === "no.") {
+    return nextTokenContainsDigit(text, nextSignificantIndex);
+  }
+
+  return /[A-Za-z0-9]/.test(text.charAt(nextSignificantIndex));
+}
+
+function normalizeAbbreviationKey(abbreviation) {
+  return normalizeWhitespace(abbreviation).toLocaleLowerCase();
+}
+
+function nextTokenContainsDigit(text, start) {
+  for (let index = start; index < text.length; index += 1) {
+    const character = text.charAt(index);
+    if (/\s/.test(character) || character === "," || character === ")" || character === "]") {
+      break;
+    }
+    if (isAsciiDigit(character)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function findTokenStart(text, index) {
+  let cursor = index;
+  while (cursor >= 0 && /[A-Za-z]/.test(text.charAt(cursor))) {
+    cursor -= 1;
+  }
+  return cursor + 1;
+}
+
+function findNextNonSpaceIndex(text, start) {
+  for (let index = start; index < text.length; index += 1) {
+    if (!/\s/.test(text.charAt(index))) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function isTokenBoundary(character) {
+  return !character || !/[A-Za-z]/.test(character);
+}
+
+function isAsciiDigit(character) {
+  return /[0-9]/.test(character);
+}
+
 function normalizeWhitespace(text) {
   return typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
+}
+
+function normalizeForLooseCompare(text) {
+  return normalizeWhitespace(text).toLocaleLowerCase();
 }
 
 function clamp(value, min, max) {

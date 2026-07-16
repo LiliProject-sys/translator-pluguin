@@ -1,0 +1,84 @@
+﻿Translator-plugin Stage17 DeepSeek Minimal Output Report
+生成日期：2026-07-15
+项目目录：D:\Project_Experimental\Translator_Plugin
+
+1. 修改目标
+
+本阶段目标是收紧 DeepSeek Provider 的 Word Analysis detail 输出长度和信息密度。重点让 meaningInSentence 回答“这个词在当前句子中是什么意思”，避免 DeepSeek 把整个句子背景、研究对象或专业知识一起解释出来。
+
+本阶段只调整 DeepSeek 的 detail prompt，不修改 Word Analysis Skill v6、Gemini Provider、JSON Schema、UI、Sentence Translation 或生词本数据结构。
+
+2. 修改文件
+
+- deepseek-context-provider.js
+  只修改 Word Analysis detail mode 的 prompt 约束和 detail JSON 示例。
+
+- tests/stage17-deepseek-minimal-output.test.js
+  新增 Stage17 静态测试，验证 DeepSeek detail prompt 包含更短、更聚焦的输出约束，并确认 Gemini、UI 和 Skill v6 不受影响。
+
+- report_log/Translator-plugin_Stage17_DeepSeek_Minimal_Output_Report.txt
+  本报告。
+
+3. 修改原因
+
+真实测试中，DeepSeek 在 detail 模式下容易把 meaningInSentence 写成长句，例如解释 LLM、缺陷类型、研究背景或整句含义。这不符合 Stage15/16 的“最小有效理解支点”原则。
+
+典型问题：
+- 错误方向：表示LLM识别并理解缺陷的含义、类型或原因。
+- 期望方向：解释；解读。
+
+另一个问题方向：
+- 错误方向：表示增材制造技术经过发展后进入工业生产领域，成为重要技术选择。
+- 期望方向：逐渐出现；显现。
+
+4. 修改内容
+
+DeepSeek Word Analysis detail prompt 新增约束：
+- meaningInSentence 必须只回答“这个词在当前句子中是什么意思”；
+- 只解释查询单词本身；
+- 不解释整个句子的研究内容；
+- 不复述主语、实验对象或研究背景；
+- 不扩展专业知识；
+- 尽量控制在 20 个中文字符以内；
+- 加入 interprets 与 emerges 类正反示例，帮助模型避免整句背景解释。
+
+保持不变：
+- 输出字段仍是 meaningInSentence 和 comparison；
+- comparison 仍只在明显近义词语义区别存在时生成；
+- comparison 仍只比较核心语义区别；
+- 不增加作者选择原因、写作分析或背景解释；
+- DeepSeek endpoint、鉴权、超时、取消、空响应重试、错误映射、脱敏日志、缓存 key 均未修改；
+- Gemini Provider、ai-context-skill.js、content.js 和 Sentence Translation 未修改。
+
+5. 测试结果
+
+已执行静态验证：
+- node --check deepseek-context-provider.js：通过；
+- node --check tests/stage17-deepseek-minimal-output.test.js：通过；
+- tests/stage17-deepseek-minimal-output.test.js：通过；
+- Stage6 至 Stage17 回归测试：通过；
+- manifest.json JSON 解析：通过；
+- git diff --check：通过，仅出现 Windows 换行提示；
+- Stage17 报告章节检查：通过。
+
+新增测试覆盖：
+- employed；
+- reinforcing；
+- exposed；
+- interprets；
+- requires。
+
+测试确认：
+- DeepSeek detail prompt 包含“只解释查询词本身”“不解释整句”“不复述主语/实验对象/研究背景”“20 个中文字符以内”等约束；
+- DeepSeek detail prompt 包含正反示例；
+- DeepSeek 仍返回 resultType=contextAnalysis、skillVersion=context-analysis-v6、analysisMode=detail；
+- Schema 仍是 meaningInSentence / comparison；
+- Gemini Provider 不包含 Stage17 DeepSeek 专属约束；
+- content.js 未改动，仍读取 analysis.meaningInSentence 与 comparison。
+
+仍需真实 Chrome 人工验证：
+- DeepSeek 模式下选择 interprets，确认 meaningInSentence 类似“解释；解读。”；
+- 选择 requires，确认 meaningInSentence 类似“需要；要求。”；
+- 选择 employed、reinforcing、exposed，确认 detail 不复述研究背景；
+- 确认 comparison 仍按 Skill v6 显示核心语义区别；
+- 回归 Gemini、Sentence Translation、保存生词、popup 和浮窗 resize。

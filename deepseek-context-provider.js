@@ -12,11 +12,13 @@
     const storageArea = providerOptions.storageArea || chrome.storage.local;
     const fetchImpl = providerOptions.fetchImpl || globalScope.fetch.bind(globalScope);
     const skill = providerOptions.skill || globalScope.aiContextSkill;
+    const sentenceSkill = providerOptions.sentenceSkill || globalScope.sentenceTranslationSkill;
     const timeoutMs = Number.isFinite(providerOptions.timeoutMs)
       ? Math.max(1, providerOptions.timeoutMs)
       : DEFAULT_TIMEOUT_MS;
     const cache = new Map();
     let activeController = null;
+    let activeClientRequestId = "";
     let requestSequence = 0;
 
     if (!skill || typeof skill.buildInput !== "function" || typeof skill.validateAnalysis !== "function") {
@@ -24,10 +26,19 @@
     }
 
     async function analyze(rawRequest) {
-      const input = skill.buildInput(rawRequest);
+      const requestType = normalizeRequestType(rawRequest && rawRequest.requestType);
+      const activeSkill = requestType === "sentenceTranslation" ? sentenceSkill : skill;
+      if (requestType === "sentenceTranslation" && (!activeSkill || typeof activeSkill.buildInput !== "function" || typeof activeSkill.validateTranslation !== "function")) {
+        throw new Error("DeepSeek provider requires the sentence translation skill for sentenceTranslation requests.");
+      }
+      const input = activeSkill.buildInput(rawRequest);
       const settings = await readSettings(storageArea);
       const apiKey = normalizeText(settings.deepseekApiKey);
       const model = normalizeText(settings.deepseekModel) || DEFAULT_MODEL;
+      const analysisMode = requestType === "sentenceTranslation" ? "quick" : skill.normalizeAnalysisMode
+        ? skill.normalizeAnalysisMode(rawRequest && rawRequest.analysisMode)
+        : normalizeAnalysisMode(rawRequest && rawRequest.analysisMode);
+      const clientRequestId = normalizeText(rawRequest && rawRequest.requestId);
 
       if (!apiKey) {
         throw createProviderError("CONFIG_MISSING", "请先配置 DeepSeek API Key", {
@@ -35,7 +46,7 @@
         });
       }
 
-      const cacheKey = createCacheKey(input, model, skill.skillVersion);
+      const cacheKey = createCacheKey(input, model, activeSkill.skillVersion, analysisMode, requestType);
       if (cache.has(cacheKey)) {
         return { ...cache.get(cacheKey), cached: true };
       }
@@ -46,6 +57,7 @@
 
       const controller = new AbortController();
       activeController = controller;
+      activeClientRequestId = clientRequestId;
       const requestId = `deepseek-${Date.now()}-${++requestSequence}`;
       let timedOut = false;
       const timeoutId = globalScope.setTimeout(() => {
@@ -62,7 +74,7 @@
               Authorization: `Bearer ${apiKey}`,
               "Content-Type": "application/json"
             },
-            body: JSON.stringify(createRequestBody(input, model, skill)),
+            body: JSON.stringify(createRequestBody(input, model, activeSkill, analysisMode, requestType)),
             signal: controller.signal
           });
           const responseData = await readResponseBody(response);
@@ -97,13 +109,24 @@
             });
           }
 
-          const analysis = skill.validateAnalysis(parsed);
-          const result = {
-            provider: "deepseek",
-            resultType: "contextAnalysis",
-            skillVersion: skill.skillVersion,
-            analysis
-          };
+          const analysis = requestType === "sentenceTranslation"
+            ? activeSkill.validateTranslation(parsed)
+            : activeSkill.validateAnalysis(parsed, analysisMode);
+          const result = requestType === "sentenceTranslation"
+            ? {
+              provider: "deepseek",
+              resultType: "sentenceTranslation",
+              skillVersion: activeSkill.skillVersion,
+              translation: analysis.translation,
+              keyTerm: analysis.keyTerm
+            }
+            : {
+              provider: "deepseek",
+              resultType: "contextAnalysis",
+              skillVersion: activeSkill.skillVersion,
+              analysisMode,
+              analysis
+            };
           cache.set(cacheKey, result);
           return result;
         }
@@ -121,49 +144,149 @@
         globalScope.clearTimeout(timeoutId);
         if (activeController === controller) {
           activeController = null;
+          activeClientRequestId = "";
         }
       }
+    }
+
+    function cancelRequest(requestId) {
+      if (!activeController || !activeClientRequestId || activeClientRequestId !== normalizeText(requestId)) {
+        return false;
+      }
+      activeController.abort();
+      return true;
     }
 
     function reset() {
       if (activeController) {
         activeController.abort();
         activeController = null;
+        activeClientRequestId = "";
       }
       cache.clear();
     }
 
-    return { id: "deepseek", analyze, reset };
+    return { id: "deepseek", analyze, cancelRequest, reset };
   }
 
-  function createRequestBody(input, model, skill) {
-    const example = {
+  function createRequestBody(input, model, skill, analysisMode, requestType) {
+    if (normalizeRequestType(requestType) === "sentenceTranslation") {
+      const sentenceExample = {
+        translation: "研究人员通过电化学方法评估了该材料的性能。",
+        keyTerm: {
+          term: "electrochemical method",
+          meaning: "电化学方法，利用电极反应或电化学信号进行测量、分析或调控的方法。"
+        }
+      };
+      const jsonRules = [
+        "You must return JSON only.",
+        "Do not output Markdown, code fences, prose, or any text outside the JSON object.",
+        "Return exactly translation and keyTerm. translation must be a non-empty natural Simplified Chinese translation.",
+        "keyTerm must be null unless one technical term clearly blocks comprehension. When present, it must contain exactly term and meaning; never output a list.",
+        "Do not provide IPA, part of speech, comparison, word-choice analysis, or detailed explanation.",
+        `Sentence Translation JSON example: ${JSON.stringify(sentenceExample)}`,
+        `Required JSON Schema: ${JSON.stringify(skill.outputSchema)}`
+      ].join(" ");
+      return {
+        model,
+        messages: [
+          { role: "system", content: `${skill.instructions} ${jsonRules}` },
+          { role: "user", content: JSON.stringify(skill.buildInput(input)) }
+        ],
+        response_format: { type: "json_object" },
+        thinking: { type: "disabled" },
+        max_tokens: DEFAULT_MAX_TOKENS,
+        stream: false
+      };
+    }
+    const mode = normalizeAnalysisMode(analysisMode);
+    const quickExample = {
+      word: "employed",
       lemma: "employ",
       phonetic: "/ɪmˈplɔɪ/",
       partOfSpeech: "v.",
-      commonMeaning: "雇用；使用",
-      contextualMeaning: "论文语境中指采用某种方法"
+      meaning: "使用；采用"
     };
+    const detailExample = {
+      meaningInSentence: "使用；采用。",
+      comparison: {
+        word: "apply",
+        difference: "employ 强调把技术、工具作为手段使用；apply 强调把方法作用于具体对象。"
+      }
+    };
+    const comparisonExamples = [
+      "employ vs apply:",
+      "employ emphasizes using a technology or tool as a means.",
+      "apply emphasizes applying a method to a concrete object.",
+      "reinforcing vs strengthening:",
+      "reinforcing emphasizes enhancing an existing structure or performance.",
+      "strengthening emphasizes making something stronger overall."
+    ].join(" ");
+    const modeRules = mode === "detail" ? [
+      "Mode: detail.",
+      "The JSON must contain exactly these fields: meaningInSentence, comparison.",
+      "AI must not complete understanding for the user; provide only minimal anchors that help the user continue reading.",
+      "meaningInSentence must be a brief Simplified Chinese string explaining what the selected word means in the current sentence.",
+      "meaningInSentence must answer only: What does this selected word mean in this sentence?",
+      "meaningInSentence must explain only the queried word itself, not the whole sentence.",
+      "Do not restate the subject, experimental object, research content, paper background, or professional knowledge.",
+      "Keep meaningInSentence as short as possible, preferably within 20 Chinese characters.",
+      "Bad meaningInSentence example: 表示LLM识别并理解缺陷的含义、类型或原因。",
+      "Good meaningInSentence example: 解释；解读。",
+      "Bad meaningInSentence example: 表示增材制造技术经过发展后进入工业生产领域，成为重要技术选择。",
+      "Good meaningInSentence example: 逐渐出现；显现。",
+      "comparison is a semantic difference, not a reason analysis and not an author-intention analysis.",
+      "comparison must contain exactly word and difference for one close synonym only when an obvious semantic distinction exists; otherwise return null.",
+      `Comparison examples: ${comparisonExamples}`,
+      "Do not explain why the author chose the word.",
+      "Do not write phrases like 'therefore this word is used here'.",
+      "Do not output author intention, paper background expansion, long summary, writing advice, synonym lists, or contextReason.",
+      `Detail JSON example: ${JSON.stringify(detailExample)}`
+    ] : [
+      "Mode: quick.",
+      "The JSON must contain exactly these five non-empty string fields: word, lemma, phonetic, partOfSpeech, meaning.",
+      "lemma must be the true dictionary base form only; do not explain inflection.",
+      "partOfSpeech must describe the word's actual function in the current sentence and be exactly one of adj., v., n., adv., prep., or phr.",
+      "meaning must be the common Simplified Chinese meaning of the word; do not add a separate academic meaning field.",
+      `Quick JSON example: ${JSON.stringify(quickExample)}`
+    ];
     const jsonRules = [
       "You must return JSON only.",
       "Do not output Markdown, code fences, prose, or any text outside the JSON object.",
-      "The JSON must contain exactly these five non-empty string fields: lemma, phonetic, partOfSpeech, commonMeaning, contextualMeaning.",
-      "The partOfSpeech value must be exactly one of adj., v., n., adv., prep., or phr.",
-      `Five-field JSON example: ${JSON.stringify(example)}`,
-      `Required JSON Schema: ${JSON.stringify(skill.outputSchema)}`
+      ...modeRules,
+      `Required JSON Schema: ${JSON.stringify(getModeSchema(skill, mode))}`
     ].join(" ");
 
     return {
       model,
       messages: [
         { role: "system", content: `${skill.instructions} ${jsonRules}` },
-        { role: "user", content: JSON.stringify(skill.buildInput(input)) }
+        { role: "user", content: JSON.stringify(createModeInput(skill.buildInput(input), mode)) }
       ],
       response_format: { type: "json_object" },
       thinking: { type: "disabled" },
       max_tokens: DEFAULT_MAX_TOKENS,
       stream: false
     };
+  }
+
+  function createModeInput(input, analysisMode) {
+    if (normalizeAnalysisMode(analysisMode) === "detail") {
+      return {
+        word: input.targetText,
+        sentence: input.contextSentence,
+        context: input.pageTitle,
+        userQuestion: input.userQuestion || "请详细解释该词在当前论文语境中的用法。"
+      };
+    }
+    return input;
+  }
+
+  function getModeSchema(skill, analysisMode) {
+    if (typeof skill.getOutputSchema === "function") {
+      return skill.getOutputSchema(analysisMode);
+    }
+    return skill.outputSchema;
   }
 
   function assertCompletedChoice(finishReason, requestId) {
@@ -281,8 +404,10 @@
     }
   }
 
-  function createCacheKey(input, model, skillVersion) {
+  function createCacheKey(input, model, skillVersion, analysisMode, requestType) {
     return JSON.stringify([
+      normalizeRequestType(requestType),
+      normalizeAnalysisMode(analysisMode),
       normalizeText(input.targetText).toLocaleLowerCase(),
       normalizeText(input.contextSentence),
       normalizeText(input.pageTitle),
@@ -304,6 +429,16 @@
 
   function normalizeText(value) {
     return typeof value === "string" ? value.trim() : "";
+  }
+
+  function normalizeAnalysisMode(value) {
+    return normalizeText(value).toLocaleLowerCase() === "detail" ? "detail" : "quick";
+  }
+
+  function normalizeRequestType(value) {
+    return normalizeText(value) === "sentenceTranslation"
+      ? "sentenceTranslation"
+      : "wordAnalysis";
   }
 
   globalScope.deepSeekContextProviderFactory = Object.freeze({

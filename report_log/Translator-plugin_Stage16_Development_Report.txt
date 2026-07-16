@@ -1,0 +1,79 @@
+﻿Translator-plugin Stage16 Development Report
+生成日期：2026-07-15
+项目目录：D:\Project_Experimental\Translator_Plugin
+
+1. 修改目标
+
+本阶段目标是优化 Word Analysis Detail 浮窗的信息层级。Stage15 后 AI 输出已经收敛为基础词汇信息、当前语境和可选近义词区别，但三个区域在视觉上连续堆叠，阅读时不够容易区分。
+
+Stage16 只在前端浮窗中加入轻量浅灰分割线，让用户快速识别：
+- 第一层：单词基础信息；
+- 第二层：当前语境辅助理解；
+- 第三层：近义词语义区别。
+
+2. 修改文件
+
+- content.js
+  增加 Word Analysis Detail 区域的浅灰分割线样式，并在有 comparison 时为近义词区别行添加分区 class。未修改请求流程、字段读取逻辑、resize 生命周期或关闭逻辑。
+
+- README.md
+  增加 Stage16 简短说明和人工验收项，并将 ai-context-skill.js 的说明同步为当前 v6。
+
+- tests/stage16-ui-density.test.js
+  新增静态测试，确认 Stage16 分割线样式、Word Detail 条件渲染、Sentence Translation 不受影响，以及 Skill/Provider 契约未改变。
+
+- report_log/Translator-plugin_Stage16_Development_Report.txt
+  本报告。
+
+3. UI变化
+
+- Word Analysis Quick 基础信息保持原有字段和显示方式：
+  word / lemma / phonetic / partOfSpeech / meaning。
+
+- 用户点击“详细解释”后，基础信息和 Detail 区域之间使用浅灰细线分隔。
+
+- Detail 区域中，“当前语境”和“近义词区别”之间使用浅灰细线分隔。
+
+- 当 comparison 为 null 时，不显示“近义词区别”区域，也不会留下多余分割线。
+
+- 分割线使用细线、小间距和留白，不增加卡片、大面积背景色、复杂动画或强视觉强调。
+
+4. 测试结果
+
+已执行的静态验证包括：
+- content.js 语法检查；
+- 新增 Stage16 静态测试；
+- Stage6 至 Stage16 回归测试；
+- manifest.json JSON 解析；
+- git diff --check。
+
+静态验证关注点：
+- 分割线样式只作用于 Word Analysis Detail 区域；
+- Sentence Translation UI 不套用 Word Detail 分区结构；
+- quick/detail 请求逻辑未改变；
+- meaningInSentence 和 comparison 字段读取逻辑未改变；
+- manifest 版本保持 0.10.0。
+
+仍需真实 Chrome 人工验证：
+- 选择 exposure 并点击“详细解释”，确认基础信息与当前语境之间的分割线正常；
+- 选择 employ，确认有 comparison 时当前语境和近义词区别之间的分割线正常；
+- 选择 reinforcing，确认无 comparison 时没有空区域或多余分割线；
+- 调整浮窗尺寸后，布局和滚动区域正常；
+- 外部点击、Esc、固定浮窗、保存生词和 Sentence Translation 继续正常。
+
+5. 未修改内容
+
+本阶段确认不修改：
+- Word Analysis Skill；
+- ai-context-skill.js 的字段结构和 JSON Schema；
+- Gemini Provider；
+- DeepSeek Provider；
+- AI Prompt；
+- comparison 逻辑；
+- meaningInSentence 逻辑；
+- vocabularyEntries；
+- translationSettings；
+- 生词保存、去重和右键菜单；
+- popup；
+- Sentence Translation；
+- 浮窗 resize、固定定位、关闭、取消请求和旧响应隔离机制。

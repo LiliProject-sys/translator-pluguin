@@ -1,0 +1,152 @@
+﻿Translator-plugin Stage11 开发报告
+
+生成日期：2026-07-14
+报告类型：开发历史记录（TXT）
+项目目录：D:\Project_Experimental\Translator_Plugin
+当前插件版本：0.6.0
+
+1. 本阶段目标
+
+Stage11 的目标是在 Stage10 固定视口浮窗基础上，为划词浮窗增加用户手动调整大小能力。用户划词后，浮窗仍固定在浏览器视口中，但可以通过右下角原生 resize 调整宽度和高度，便于阅读较长的 AI Detail 解释。
+
+本阶段只优化浮窗交互体验，不修改 AI Skill、Provider 协议、Gemini / DeepSeek / 百度请求逻辑、vocabularyEntries 数据结构、popup 功能或生词本保存逻辑。
+
+2. 修改内容
+
+主要修改 content.js：
+
+- 为浮窗外层增加原生 resize: both。
+- 设置浮窗尺寸限制：min-width: 320px、min-height: 220px、max-width: calc(100vw - 24px)、max-height: calc(100vh - 24px)。
+- 将浮窗定位时的临时 display 从 block 修正为 flex，保证内部弹性布局生效。
+- 将翻译和 AI 分析内容区设置为 flex: 1 1 auto、min-height: 0、overflow: auto，让用户扩大浮窗后内容区可以获得更多阅读空间。
+- 增加 ResizeObserver，在浮窗尺寸变化后调用 keepSelectionPanelInViewport()，将浮窗修正回视口范围内。
+- 增加浮窗内部 mouseup 事件隔离，避免 resize 或内部按钮操作被 document 级 mouseup 误判为重新划词。
+- 关闭浮窗时断开 ResizeObserver，避免残留监听器。
+
+测试相关修改：
+
+- 新增 tests/stage11-floating-panel-resize.test.js，覆盖 resize CSS、ResizeObserver、事件隔离、请求生命周期保护、外部点击与 Escape 关闭规则。
+- 更新 tests/stage10-floating-panel-interaction.test.js 中关于内部滚动区域的静态断言，使其兼容 Stage11 的可调尺寸布局。
+
+报告相关修改：
+
+- 生成 Stage11_Development_Report.md，作为上一轮 Markdown 开发报告。
+- 本次按新规范生成 report_log\Translator-plugin_Stage11_Development_Report.txt，作为最终 TXT 开发历史记录。
+
+3. 实现方案
+
+Stage11 采用浏览器原生 CSS resize，而不是自定义拖拽系统。核心策略是：浮窗外层保持 position: fixed，首次仍根据选区 Range 的 getBoundingClientRect() 定位；之后用户可以通过右下角调整大小。
+
+浮窗外层继续使用 display: flex 和 flex-direction: column。上方词条、状态、按钮区域保持固定自然高度，翻译 / AI 分析区域作为主要内容区使用 flex: 1 1 auto 和 overflow: auto。这样 Detail 内容变长时，用户可以通过扩大浮窗获得更多可读空间，而不是让浮窗无限增高或产生多个复杂滚动区域。
+
+视口边界处理使用 ResizeObserver。观察到浮窗尺寸变化后，只执行 keepSelectionPanelInViewport()，根据当前 left / top 和新的 panelRect 尺寸进行 clamp 修正：右侧超出时向左修正，底部超出时向上修正。该逻辑不会重新读取 Selection，也不会重新创建浮窗。
+
+事件隔离复用 Stage10 的 isEventInsideSelectionPanel(event) 和 panelPointerDown 机制。浮窗内部 mousedown、mouseup、click 均阻止冒泡到 document 级监听器。这样原生 resize 产生的鼠标事件不会触发 showPanelForCurrentSelection()。
+
+4. Bug与经验记录
+
+Stage11 最重要的风险点是：原生 resize 并不是一个孤立动作，它会触发 mousedown、mousemove、mouseup 等 DOM 事件。
+
+当前插件存在 document 级 mouseup 监听，用于判断用户是否完成划词。如果浮窗内部 resize 产生的 mouseup 冒泡到 document，插件可能把它误判为一次新的网页划词。
+
+潜在错误流程如下：
+
+调整浮窗大小 -> mouseup 冒泡 -> 被 document mouseup 误判为重新选词 -> 调用 showPanelForCurrentSelection() -> 创建新的 selectionId -> 发送新的 TRANSLATE_TEXT -> 原 Quick / Detail 生命周期混乱。
+
+这个问题属于 Chrome Extension 中典型的“DOM 事件冒泡”和“业务事件”冲突。浮窗、右键工具、阅读助手类插件尤其容易遇到类似问题。
+
+经验记录：
+
+- 后续只要涉及 resize、drag、scrollbar、浮窗内部按钮、输入框、菜单等交互，都应优先检查事件隔离。
+- 不要只处理 click，mousedown 和 mouseup 同样重要。
+- 对 content script 来说，document 级监听越多，浮窗内部交互越需要明确边界。
+- 请求生命周期保护不能只依赖后台取消；前端必须避免无意义地制造新 selectionId 和新请求。
+
+Skill 后续优化记录：
+
+- 后续应考虑删除固定 confusableWord 输出。
+- 更推荐改为“近义词辨析”能力：重点解释为什么论文当前语境使用这个词，以及为什么不用另一个词。
+- 示例方向：employ vs apply。分析应聚焦当前词在句子中的选择原因，以及近义词的语义重点区别。
+- 不要扩展成大量同义词列表。当前产品定位是辅助论文阅读，不是做词典或同义词库。
+
+5. 测试结果
+
+已执行并通过：
+
+- manifest.json 使用 Node UTF-8 读取并通过 JSON.parse()。
+- 顶层 JavaScript 文件执行 node --check。
+- tests/stage6-interactions-bugfix.test.js
+- tests/stage7-deepseek-provider-framework.test.js
+- tests/stage8-skill2-optimization.test.js
+- tests/stage9-ai-skill-upgrade.test.js
+- tests/stage9.2-detail-lifecycle.test.js
+- tests/stage10-floating-panel-interaction.test.js
+- tests/stage11-floating-panel-resize.test.js
+- git diff --check 无尾随空白错误，仅有 Windows CRLF 提示。
+
+Stage11 静态测试重点确认：
+
+- resize: both 存在。
+- min / max 尺寸限制存在。
+- ResizeObserver 存在，并只触发视口边界修正。
+- resize 相关逻辑不调用 showPanelForCurrentSelection()。
+- resize 相关逻辑不调用 closeSelectionPanel()。
+- resize 相关逻辑不调用 cancelLanguageRequests()。
+- resize 相关逻辑不递增 currentSelectionId 或 detailAnalysisRequestId。
+- 外部点击关闭和 Escape 关闭仍然保留。
+
+未执行：
+
+- 真实 Chrome 页面人工验证。
+- Word 排版。
+- LibreOffice 转换。
+- PDF 转换。
+- PNG 渲染。
+- 页面视觉检查。
+- 表格审计。
+- 字体检查。
+
+6. 当前架构摘要
+
+当前 Translator-plugin 的核心结构保持不变：
+
+用户在网页中划词后，content.js 读取 Selection 和上下文快照，创建固定视口浮窗。浮窗同时发起本地收录状态查询和语言处理请求。background.js 负责统一消息入口、状态查询、保存去重、Provider 调度和请求取消。语言处理由 translation-provider.js 调度百度、DeepSeek、Gemini 或 Mock Provider。生词数据仍保存到 chrome.storage.local 的 vocabularyEntries。
+
+Stage11 只改变 content script 中浮窗的 UI 行为：
+
+- 浮窗可以 resize。
+- 浮窗尺寸变化后保持在视口内。
+- 浮窗内部事件不会干扰 document 级划词监听。
+- Quick / Detail 请求生命周期不因 resize 发生变化。
+
+Provider Framework、AI Skill、API 请求格式、storage key、popup、生词字段均未改变。
+
+7. 已知限制
+
+- 当前只使用浏览器原生 resize，不实现自定义拖拽手柄。
+- 用户调整后的尺寸不持久化，关闭浮窗后下次划词恢复默认尺寸。
+- 浮窗位置仍不是自由拖动窗口，只会首次根据选区定位，并在视口边界内修正。
+- 不提供最大化、还原或重置尺寸按钮。
+- 原生 resize 手柄的视觉表现由浏览器和系统决定，不同平台可能略有差异。
+- Stage11 尚未在真实 Chrome 页面中完成手工验收。
+
+需要人工验证的 Chrome 场景：
+
+- 划词打开浮窗。
+- 拖动右下角扩大浮窗。
+- 拖动右下角缩小浮窗。
+- 页面滚动后浮窗保持固定视口位置。
+- 点击“详细解释”，在 Detail 加载过程中调整大小。
+- Detail 返回结果正常显示。
+- 点击浮窗内部按钮不会误触发重新划词。
+- 点击外部仍能关闭。
+- Escape 仍能关闭。
+- 重新划选正文中的其它文本时，旧浮窗被替换，新浮窗正常显示。
+
+8. 版本变化
+
+manifest.json 当前版本保持为 0.6.0。
+
+Stage11 未要求升级插件版本，因此本阶段没有修改 manifest.json version。功能变化属于浮窗交互优化，不涉及 storage 迁移、权限变更、Provider 协议变更或用户数据结构变更。
+
+以后如果进入正式分发或发布给更多测试用户，可以单独制定版本号策略，再决定是否将 Stage11 对应为 0.6.1 或后续版本。

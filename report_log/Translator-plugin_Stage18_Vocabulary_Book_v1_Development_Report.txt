@@ -1,0 +1,186 @@
+﻿Translator-plugin Stage18 Vocabulary Book v1 Development Report
+生成日期：2026-07-16
+项目目录：D:\Project_Experimental\Translator_Plugin
+
+1. 阶段背景与目标
+
+Stage18 之前，Translator-plugin 已经具备划词浮窗、Word Analysis、Sentence Translation、Gemini / DeepSeek / 百度 / Mock Provider、请求取消、浮窗 resize 和本地保存能力。但生词本仍主要依赖 popup 中的窄列表，不适合长期浏览和回顾大量词条。
+
+本阶段目标是升级为“生词本 v1”：保留现有 vocabularyEntries storage key，扩展新词条的可选词汇信息，新增独立生词本页面，并提供搜索、随机、最近添加和字母顺序三种浏览方式。
+
+2. 修改文件
+
+- manifest.json
+  版本从 0.10.0 升级到 0.11.0。
+
+- background.js
+  扩展保存数据结构，支持可选 Quick 字段；新增精确重复时的渐进补全；新增 DELETE_VOCABULARY_ENTRY 和 OPEN_VOCABULARY_SOURCE 统一消息；打开来源使用协议白名单。
+
+- content.js
+  在 Word Analysis quick 响应仍属于当前选区时，把 lemma、phonetic、partOfSpeech、meaning 写入当前选区快照。迟到响应、旧选区响应、已关闭浮窗响应不会污染保存 payload。
+
+- popup.html / popup.css / popup.js
+  popup 收缩为词条数量、设置入口和“打开生词本”入口，不再维护完整列表浏览 UI。
+
+- vocabulary.html / vocabulary.css / vocabulary.js
+  新增独立生词本页面，支持搜索、排序、随机顺序会话保持、删除、打开来源和 storage 变化更新。
+
+- README.md
+  增加 Stage18 说明、数据结构、旧词条兼容、排序状态和人工验收清单。
+
+- tests/stage18-vocabulary-book.test.js
+  新增 Stage18 自动化/静态测试。
+
+3. 新词条结构
+
+继续使用 chrome.storage.local 中的 vocabularyEntries。
+
+基础字段保持不变：
+{
+  id,
+  word,
+  contextSentence,
+  pageTitle,
+  pageUrl,
+  createdAt
+}
+
+Word Analysis quick 已经返回时，新保存词条可额外保存：
+{
+  lemma,
+  phonetic,
+  partOfSpeech,
+  meaning
+}
+
+不保存：
+- meaningInSentence；
+- comparison；
+- Sentence Translation 结果；
+- keyTerm；
+- AI 长解释；
+- 智能复习状态。
+
+4. 各保存入口如何处理
+
+- 浮窗保存
+  如果当前选区是 Word Analysis，且 quick 响应通过 selectionId、quick request id、当前浮窗和当前快照对象检查，则保存时附带 lemma、phonetic、partOfSpeech、meaning。不会为了保存再次调用 AI。
+
+- 右键菜单保存
+  仍按原方式立即保存 word、contextSentence、pageTitle、pageUrl 和 createdAt。Quick 字段允许缺失，不阻塞保存。
+
+- Sentence Translation 保存
+  保持原有行为，只保存基础字段。句子和段落不会附加 Word Quick 字段。
+
+5. 旧词条兼容和渐进补全策略
+
+旧词条缺少 lemma、phonetic、partOfSpeech、meaning 时仍可正常读取和展示。独立生词本页面隐藏缺失字段，不显示空标签、undefined 或大量占位。
+
+精确重复仍按 word + contextSentence + pageUrl 判断。新增字段不参与重复身份判断。
+
+如果再次保存一个精确重复旧词条，并且本次 payload 带有 Quick 字段，后台只补充旧词条缺失的字段：
+- 不新增重复词条；
+- 不覆盖已有非空字段；
+- 不修改 id；
+- 不修改 createdAt；
+- 返回状态仍为 duplicate。
+
+渐进补全不会重建或打乱 vocabularyRandomOrder，因为词条 id 不变。
+
+6. 独立生词本页面
+
+新增 vocabulary.html 作为完整标签页生词本。每张卡片显示：
+- lemma (word) 或 word；
+- phonetic；
+- partOfSpeech；
+- meaning；
+- contextSentence；
+- pageTitle；
+- createdAt；
+- 打开来源；
+- 删除。
+
+长单词、短语、句子和段落均允许自然换行，避免横向溢出。
+
+7. 搜索与三种排序
+
+搜索字段：
+- word；
+- lemma；
+- meaning；
+- contextSentence；
+- pageTitle。
+
+排序模式：
+- random：默认模式；
+- recent：createdAt 从新到旧；
+- alphabetical：优先 lemma，没有 lemma 时用 word，忽略大小写。
+
+搜索只过滤当前排序结果，不改变 storage，也不重建随机顺序。
+
+8. local/session 两类状态的设计原因
+
+vocabularySortMode 保存到 chrome.storage.local，用于记住用户长期偏好的排序模式。
+
+vocabularyRandomOrder 保存到 chrome.storage.session，只保存词条 id 数组。这样可以让同一次 Chrome 运行期间的随机顺序稳定，同时在完全关闭并重启 Chrome 后自然重新生成随机顺序。
+
+9. 随机顺序稳定规则
+
+- 随机排序只影响展示，不回写 vocabularyEntries；
+- 删除词条时只从 vocabularyRandomOrder 中移除该 id；
+- 新增词条时追加新 id 到当前随机顺序末尾；
+- 渐进补全不会移动词条；
+- 搜索不重建随机顺序；
+- 清空搜索后恢复原顺序；
+- 切换到 recent 或 alphabetical 后再切回 random，恢复 session 中已有顺序；
+- 点击“重新随机”时才完整重排。
+
+10. 测试结果
+
+已执行：
+- node --check 顶层 JavaScript；
+- tests/stage18-vocabulary-book.test.js；
+- Stage6 至 Stage18 回归测试；
+- manifest.json JSON 解析；
+- git diff --check；
+- Stage18 报告章节检查。
+
+测试覆盖：
+- 新词条保存可选 Quick 字段；
+- 旧词条合法；
+- 不保存 meaningInSentence / comparison / translation / keyTerm；
+- 迟到 quick 响应不得污染当前快照；
+- Sentence Translation 保存仍只带基础字段；
+- 精确重复渐进补全；
+- 随机顺序 local/session 状态；
+- 删除、新增、搜索和排序；
+- 缺失字段不显示空标签；
+- popup 打开独立页面；
+- 打开来源协议白名单。
+
+仍需真实 Chrome 人工验收：
+- 保存有 Quick 结果的新词；
+- 右键保存无 Quick 字段词条；
+- 保存句子或段落；
+- 查看旧词条；
+- 三种排序和重新随机；
+- 刷新、重开页面、重启 Chrome 的随机顺序行为；
+- 生词本打开时从网页新增词条；
+- 搜索、删除和打开来源；
+- 回归划词翻译、Word Analysis、Sentence Translation、popup 设置入口和右键保存。
+
+11. 当前架构摘要
+
+content.js 负责选区、浮窗、Quick 字段快照和保存请求。background.js 统一负责保存、去重、渐进补全、删除和打开来源。vocabulary.js 负责独立页面展示、搜索、排序和随机顺序状态。popup 只保留入口功能。AI Provider 与 Skill 不参与生词本浏览逻辑。
+
+12. 已知限制
+
+- 不做智能复习、熟悉度、词根、自动出题、打卡或云同步；
+- 不批量补全旧词条；
+- 不保存 AI detail、comparison 或句段翻译结果；
+- randomOrder 依赖 chrome.storage.session，完全关闭 Chrome 后会重新生成；
+- AI 生成的 Quick 字段可能有误，生词本只保存当时的结果。
+
+13. 版本变化
+
+manifest.json 版本从 0.10.0 升级到 0.11.0。

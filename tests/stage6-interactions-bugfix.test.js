@@ -1,4 +1,4 @@
-const assert = require("assert");
+﻿const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
@@ -14,11 +14,11 @@ require(path.join(projectRoot, "gemini-context-provider.js"));
 require(path.join(projectRoot, "deepseek-context-provider.js"));
 
 const validAnalysis = Object.freeze({
+  word: "employed",
   lemma: "employ",
   phonetic: "/ɪmˈplɔɪ/",
   partOfSpeech: "v.",
-  commonMeaning: "雇用；使用",
-  contextualMeaning: "雇用"
+  meaning: "雇用；使用"
 });
 
 function createStorage(settings) {
@@ -86,7 +86,7 @@ async function testInteractionsRequestAndCompletedResponse() {
   assert.equal(capturedRequest.options.headers["x-goog-api-key"], "test-api-key");
   const body = JSON.parse(capturedRequest.options.body);
   assert.equal(body.model, "gemini-3.1-flash-lite");
-  assert.equal(body.system_instruction, aiContextSkill.instructions);
+  assert.match(body.system_instruction, /Mode: quick/);
   assert.equal(typeof body.input, "string");
   assert.deepEqual(JSON.parse(body.input), aiContextSkill.buildInput({
     targetText: "employed",
@@ -97,7 +97,7 @@ async function testInteractionsRequestAndCompletedResponse() {
   }));
   assert.equal(body.response_format.type, "text");
   assert.equal(body.response_format.mime_type, "application/json");
-  assert.deepEqual(body.response_format.schema, aiContextSkill.outputSchema);
+  assert.deepEqual(body.response_format.schema, aiContextSkill.getOutputSchema("quick"));
   assert.equal(body.store, false);
   assert.equal(Object.prototype.hasOwnProperty.call(body, "generationConfig"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(body, "previous_interaction_id"), false);
@@ -166,7 +166,7 @@ async function testOutputFailures() {
       lemma: "test",
       phonetic: "/test/",
       partOfSpeech: "n.",
-      contextualMeaning: "test"
+      meaning: "test"
     }))
   ).analyze({ targetText: "missing-field" }), "INVALID_ANALYSIS_SCHEMA");
 
@@ -249,7 +249,7 @@ function testVocabularyShapeAndSourceInvariants() {
   assert.equal(providerSource.includes("generationConfig"), false);
   assert.equal(providerSource.includes("candidates"), false);
   assert(background.includes("safeError.diagnostics"));
-  assert.equal(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8").includes('"version": "0.4.0"'), true);
+  assert.equal(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8").includes('"version": "1.0.0"'), true);
   assert.equal(fs.readFileSync(path.join(projectRoot, "options.js"), "utf8").includes('"gemini-3.5-flash"'), true);
 }
 

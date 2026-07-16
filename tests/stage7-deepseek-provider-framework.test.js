@@ -1,4 +1,4 @@
-const assert = require("assert");
+﻿const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
@@ -13,11 +13,11 @@ require(path.join(projectRoot, "ai-context-skill.js"));
 require(path.join(projectRoot, "deepseek-context-provider.js"));
 
 const validAnalysis = Object.freeze({
+  word: "employed",
   lemma: "employ",
   phonetic: "/ɪmˈplɔɪ/",
   partOfSpeech: "v.",
-  commonMeaning: "雇用；使用",
-  contextualMeaning: "雇用"
+  meaning: "雇用；使用"
 });
 
 function createStorage(settings) {
@@ -84,8 +84,8 @@ async function testRequestAndSuccess() {
   assert.match(body.messages[0].content, /lemma/);
   assert.match(body.messages[0].content, /phonetic/);
   assert.match(body.messages[0].content, /partOfSpeech/);
-  assert.match(body.messages[0].content, /commonMeaning/);
-  assert.match(body.messages[0].content, /contextualMeaning/);
+  assert.match(body.messages[0].content, /meaning/);
+  assert.doesNotMatch(body.messages[0].content, /academicMeaning/);
   assert.equal(result.provider, "deepseek");
   assert.equal(result.resultType, "contextAnalysis");
   assert.deepEqual(result.analysis, validAnalysis);
@@ -279,7 +279,7 @@ function testStaticIntegration() {
   const options = fs.readFileSync(path.join(projectRoot, "options.js"), "utf8");
   const provider = fs.readFileSync(path.join(projectRoot, "translation-provider.js"), "utf8");
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.4.0");
+  assert.equal(manifest.version, "1.0.0");
   assert(manifest.host_permissions.includes("https://api.deepseek.com/*"));
   assert(background.includes('"deepseek-context-provider.js"'));
   assert(background.includes("deepSeekContextProvider.reset"));

@@ -1,0 +1,142 @@
+Translator-plugin Stage14 Development Report
+
+1. 本阶段背景
+
+Stage13 已经将 Word Analysis 与 Sentence Translation 分离。真实使用中，Word Analysis 的浮窗仍然包含较多信息：academicMeaning 会把常见词义和论文语境拆成两行，wordChoiceReason 容易诱导模型推测作者心理，Detail 区域也偏长。本阶段目标是缩短 Word Analysis 输出，保留用户真正需要的三件事：词本身是什么意思、当前句子中具体表示什么、必要时与一个近义词的语义边界有什么不同。
+
+本阶段只优化 Word Analysis，不修改 Sentence Translation、Provider 框架、生词保存、popup、右键菜单、浮窗 resize、请求取消和旧响应隔离。
+
+2. 为什么删除 academicMeaning
+
+academicMeaning 原本用于补充“论文中含义”，但实际会增加记忆负担。很多词并不存在稳定的“论文专属含义”，强行拆分 commonMeaning 与 academicMeaning 容易让用户以为同一个词只能在论文中这样理解，也会降低词义迁移能力。
+
+Stage14 改为只保留 meaning：它表示该词本身的常见中文含义。具体到当前句子的语义由 Detail 层的 contextualMeaning 承担。
+
+3. 为什么删除 wordChoiceReason
+
+wordChoiceReason 容易把问题引向“作者为什么选择这个词”的心理推测。用户在阅读论文时更需要知道词在这里具体表示什么，而不是模型推测作者意图。
+
+Stage14 删除该字段，把 Detail 层收敛为 contextualMeaning 与可选 comparison。comparison.contextReason 在必要时已经能自然解释为什么当前词比近义词更符合当前句子，不需要单独生成 wordChoiceReason。
+
+4. 为什么保留 comparison
+
+comparison 仍然有价值，但语义被重新定义为“语义关注点比较”，不是“易混淆词标签”，也不是中文翻译差异。它只在以下条件全部满足时出现：
+
+- 当前词存在明显容易混淆的近义词；
+- 两个词中文含义接近；
+- 二者语义关注点不同；
+- 这种区别会影响当前句子的选择。
+
+comparison 只允许一个对象或 null。对象字段为 word、difference、contextReason。它不允许同义词列表、词汇扩展、写作建议或泛泛评价。
+
+5. Skill 与 Schema 变化
+
+Word Skill 版本从 context-analysis-v4 升级为 context-analysis-v4.1。
+
+Quick Schema：
+
+{
+  word,
+  lemma,
+  phonetic,
+  partOfSpeech,
+  meaning
+}
+
+Detail Schema：
+
+{
+  contextualMeaning,
+  comparison
+}
+
+comparison 为 null，或严格对象：
+
+{
+  word,
+  difference,
+  contextReason
+}
+
+所有对象 additionalProperties 均为 false。所有字符串 trim 后必须非空。partOfSpeech 继续限定为 adj.、v.、n.、adv.、prep.、phr.。
+
+6. UI 变化
+
+Quick 区域现在显示：
+
+- 单词
+- 音标
+- 词性
+- 含义
+
+Detail 区域现在只显示：
+
+- 当前语境
+- 近义词区别（仅 comparison 非 null 时显示）
+
+“为什么使用该词”已删除。comparison 为 null 时不显示比较标题，也不显示空占位，保持浮窗紧凑。浮窗 fixed 定位、resize、内部滚动、外部点击关闭、Esc 关闭、selectionId 和 detail requestId 生命周期未改变。
+
+7. Provider 兼容
+
+Gemini 与 DeepSeek 继续使用同一个 Word Skill，只同步了 prompt、JSON 示例和 Schema 字段。API endpoint、鉴权、超时、AbortController、错误映射、缓存、空响应重试和脱敏日志保持不变。
+
+缓存 key 已包含 skillVersion，因此 context-analysis-v4.1 会自然隔离旧缓存。
+
+百度与 Mock 仍返回 quickTranslation，不受 Word Skill 修改影响。
+
+Sentence Translation 仍使用 sentence-translation-skill.js 和 sentence-translation-v1，requestType、Schema、UI 和缓存逻辑均未修改。
+
+8. 测试结果
+
+已实现：
+
+- ai-context-skill.js 升级到 context-analysis-v4.1。
+- Quick 字段切换为 word、lemma、phonetic、partOfSpeech、meaning。
+- Detail 字段切换为 contextualMeaning、comparison。
+- comparison 对象升级为 word、difference、contextReason。
+- Gemini 与 DeepSeek Word prompt 同步到 v4.1。
+- content.js 浮窗 UI 删除论文中含义和为什么使用该词。
+- manifest.json 版本升级到 0.9.0。
+- README 已更新 Stage14 说明。
+- 新增 Stage14 测试。
+
+已静态验证：
+
+- 所有顶层 JavaScript 文件通过 node --check。
+- Stage6 至 Stage14 测试通过。
+- manifest.json 可按 UTF-8 读取并 JSON.parse。
+- git diff --check 未发现 whitespace error。
+- 静态确认没有向 vocabularyEntries 写入 AI 字段。
+
+需要真实 Chrome 验证：
+
+- Gemini/DeepSeek 真实 Key 下 employed 的 Quick 和 Detail 展示。
+- reinforcing effect 返回 adj. 且 comparison 为 null。
+- electrochemical 不强制生成无意义 comparison。
+- 完整句子仍进入 Sentence Translation。
+- 浮窗 resize、关闭、快速连续划词和请求取消仍符合 Stage10/Stage11 生命周期。
+- 生词保存、右键菜单、popup 查看/删除/打开来源继续正常。
+
+9. 当前架构摘要
+
+用户划词后，content.js 根据选中文本判断 requestType。单词或短语进入 Word Analysis，完整句子或段落进入 Sentence Translation。Word Analysis 先发 quick 请求，用户点击“详细解释”后再发 detail 请求。background.js 通过 languageService 调度当前 Provider。Gemini/DeepSeek 使用 ai-context-skill.js 或 sentence-translation-skill.js；百度/Mock 仍作为 quickTranslation Provider。生词保存始终走 SAVE_VOCABULARY_ENTRY，仅保存 id、word、contextSentence、pageTitle、pageUrl、createdAt。
+
+10. 已知限制
+
+- AI 输出仍可能有语义错误；Schema 只能校验结构，不能保证语言分析完全正确。
+- phonetic 由 AI Provider 生成，不接入权威发音词典。
+- comparison 只允许一个近义词，不做完整同义词辨析列表。
+- Detail 结果不持久化，关闭浮窗或 service worker 休眠后不会保留。
+- 当前不做写作辅助、第三层分析、AI 结果持久化、复杂 NLP 或云同步。
+
+11. 版本变化
+
+- manifest.json：0.8.0 -> 0.9.0。
+- Word Skill：context-analysis-v4 -> context-analysis-v4.1。
+- Sentence Skill：保持 sentence-translation-v1。
+
+12. 后续建议
+
+- 用真实 Gemini 和 DeepSeek 分别验证 employed/apply、reinforcing effect、electrochemical 三个典型样例。
+- 根据真实输出继续微调 prompt 中对 comparison 触发条件的约束。
+- 后续若要保存 AI 结果，应另设结构和迁移策略，不应直接塞入 vocabularyEntries。

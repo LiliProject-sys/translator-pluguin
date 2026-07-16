@@ -51,6 +51,12 @@
           provider: activeProvider,
           resultType: "quickTranslation"
         }));
+      },
+
+      cancelRequests(requestIds) {
+        return typeof provider.cancelRequests === "function"
+          ? provider.cancelRequests(normalizeRequestIds(requestIds))
+          : 0;
       }
     };
   }
@@ -60,6 +66,7 @@
     const delayMs = Number.isFinite(providerOptions.delayMs)
       ? Math.max(0, providerOptions.delayMs)
       : DEFAULT_MOCK_DELAY_MS;
+    const pendingRequests = new Map();
 
     return {
       id: "mock",
@@ -67,9 +74,13 @@
       translate(request) {
         const text = normalizeText(request && request.text);
         const lookupKey = normalizeLookupKey(text);
+        const requestId = normalizeText(request && request.requestId);
 
         return new Promise((resolve, reject) => {
-          globalScope.setTimeout(() => {
+          const timerId = globalScope.setTimeout(() => {
+            if (requestId) {
+              pendingRequests.delete(requestId);
+            }
             if (lookupKey === MOCK_ERROR_TEXT) {
               reject(createLanguageError("MOCK_ERROR", "Mock 翻译失败"));
               return;
@@ -81,7 +92,22 @@
               translatedText: MOCK_TRANSLATIONS[lookupKey] || `模拟译文：${text}`
             });
           }, delayMs);
+          if (requestId) {
+            pendingRequests.set(requestId, { timerId, reject });
+          }
         });
+      },
+
+      cancelRequest(requestId) {
+        const normalizedRequestId = normalizeText(requestId);
+        const pending = pendingRequests.get(normalizedRequestId);
+        if (!pending) {
+          return false;
+        }
+        globalScope.clearTimeout(pending.timerId);
+        pendingRequests.delete(normalizedRequestId);
+        pending.reject(createLanguageError("REQUEST_CANCELLED", "处理请求已取消"));
+        return true;
       }
     };
   }
@@ -110,19 +136,23 @@
         execute: async (request) => {
           const result = await baiduProvider.translate(request);
           return { ...result, provider: "baidu", resultType: "quickTranslation" };
-        }
+        },
+        cancel: (requestId) => cancelProviderRequest(baiduProvider, requestId)
       }),
       deepseek: Object.freeze({
         resultType: "contextAnalysis",
-        execute: (request) => deepSeekProvider.analyze(toContextAnalysisRequest(request))
+        execute: (request) => deepSeekProvider.analyze(toAiLanguageRequest(request)),
+        cancel: (requestId) => cancelProviderRequest(deepSeekProvider, requestId)
       }),
       gemini: Object.freeze({
         resultType: "contextAnalysis",
-        execute: (request) => geminiProvider.analyze(toContextAnalysisRequest(request))
+        execute: (request) => geminiProvider.analyze(toAiLanguageRequest(request)),
+        cancel: (requestId) => cancelProviderRequest(geminiProvider, requestId)
       }),
       mock: Object.freeze({
         resultType: "quickTranslation",
-        execute: (request) => mockProvider.translate(request)
+        execute: (request) => mockProvider.translate(request),
+        cancel: (requestId) => cancelProviderRequest(mockProvider, requestId)
       })
     });
 
@@ -145,6 +175,18 @@
       getActiveModeInfo,
       providerRegistry,
 
+      cancelRequests(requestIds) {
+        let cancelledCount = 0;
+        normalizeRequestIds(requestIds).forEach((requestId) => {
+          Object.values(providerRegistry).forEach((entry) => {
+            if (typeof entry.cancel === "function" && entry.cancel(requestId)) {
+              cancelledCount += 1;
+            }
+          });
+        });
+        return cancelledCount;
+      },
+
       async process(request, processOptions) {
         const providerOverride = normalizeText(processOptions && processOptions.providerOverride);
         const providerId = providerOverride
@@ -155,13 +197,17 @@
     };
   }
 
-  function toContextAnalysisRequest(request) {
+  function toAiLanguageRequest(request) {
     return {
       targetText: request.text,
       contextSentence: request.contextSentence,
       pageTitle: request.pageTitle,
       sourceLanguage: request.sourceLanguage,
-      targetLanguage: request.targetLanguage
+      targetLanguage: request.targetLanguage,
+      requestType: request.requestType,
+      analysisMode: request.analysisMode,
+      requestId: request.requestId,
+      userQuestion: request.userQuestion
     };
   }
 
@@ -174,11 +220,32 @@
       if (!skill || typeof skill.validateAnalysis !== "function") {
         throw createLanguageError("SKILL_UNAVAILABLE", "语境解析校验模块不可用");
       }
+      const analysisMode = normalizeAnalysisMode(result && result.analysisMode);
       return {
         provider,
         resultType,
         skillVersion: normalizeText(result && result.skillVersion) || skill.skillVersion,
-        analysis: skill.validateAnalysis(result && result.analysis),
+        analysisMode,
+        analysis: skill.validateAnalysis(result && result.analysis, analysisMode),
+        cached: !!(result && result.cached)
+      };
+    }
+
+    if (resultType === "sentenceTranslation") {
+      const skill = globalScope.sentenceTranslationSkill;
+      if (!skill || typeof skill.validateTranslation !== "function") {
+        throw createLanguageError("SKILL_UNAVAILABLE", "句段翻译校验模块不可用");
+      }
+      const translation = skill.validateTranslation({
+        translation: result && result.translation,
+        keyTerm: result && result.keyTerm
+      });
+      return {
+        provider,
+        resultType,
+        skillVersion: normalizeText(result && result.skillVersion) || skill.skillVersion,
+        translation: translation.translation,
+        keyTerm: translation.keyTerm,
         cached: !!(result && result.cached)
       };
     }
@@ -218,8 +285,22 @@
       contextSentence: normalizeText(payload.contextSentence),
       pageTitle: normalizeText(payload.pageTitle),
       sourceLanguage: normalizeText(payload.sourceLanguage) || "en",
-      targetLanguage: normalizeText(payload.targetLanguage) || "zh-CN"
+      targetLanguage: normalizeText(payload.targetLanguage) || "zh-CN",
+      requestType: normalizeRequestType(payload.requestType),
+      analysisMode: normalizeAnalysisMode(payload.analysisMode),
+      requestId: normalizeText(payload.requestId),
+      userQuestion: normalizeText(payload.userQuestion)
     };
+  }
+
+  function normalizeAnalysisMode(value) {
+    return normalizeText(value).toLocaleLowerCase() === "detail" ? "detail" : "quick";
+  }
+
+  function normalizeRequestType(value) {
+    return normalizeText(value) === "sentenceTranslation"
+      ? "sentenceTranslation"
+      : "wordAnalysis";
   }
 
   function normalizeProviderId(value, providerRegistry) {
@@ -229,6 +310,17 @@
 
   function normalizeLookupKey(value) {
     return normalizeText(value).replace(/\s+/g, " ").toLocaleLowerCase();
+  }
+
+  function normalizeRequestIds(requestIds) {
+    if (!Array.isArray(requestIds)) {
+      return [];
+    }
+    return [...new Set(requestIds.map(normalizeText).filter(Boolean))];
+  }
+
+  function cancelProviderRequest(provider, requestId) {
+    return !!(provider && typeof provider.cancelRequest === "function" && provider.cancelRequest(requestId));
   }
 
   function createLanguageError(code, publicMessage) {

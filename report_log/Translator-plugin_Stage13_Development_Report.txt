@@ -1,0 +1,81 @@
+Translator-plugin Stage13 开发报告
+生成日期：2026-07-15
+
+一、本阶段目标
+
+Stage13 为划词浮窗增加独立的 Sentence Translation（句子与段落翻译）流程。真实英文阅读不只会查询单词；用户经常先选中完整句子或段落快速理解整体，再深入查看具体词汇，最后保存值得学习的词。本阶段因此保留 Word Analysis，并新增互不替代的句段翻译分支。
+
+本阶段不增加写作辅助、段落总结、复杂 NLP、云同步、数据库或 AI 结果持久化。
+
+二、修改内容
+
+1. 新增 sentence-translation-skill.js
+   - Skill 版本：sentence-translation-v1。
+   - 固定中文翻译指令，要求自然翻译、保留技术术语和逻辑关系、处理学术长句。
+   - 维护说明明确该 Skill 用于快速理解英文句子和段落，不进行深度词汇分析。
+   - 严格 JSON Schema：translation 与 keyTerm。keyTerm 只能是 null 或单个 { term, meaning } 对象。
+
+2. 调整 Gemini 与 DeepSeek Provider
+   - 两个 AI Provider 根据 requestType 选择 Word Analysis Skill 或 Sentence Translation Skill。
+   - Sentence Translation 返回 resultType: sentenceTranslation；Word Analysis 继续返回 contextAnalysis。
+   - 缓存 key 纳入 requestType 与 Skill 版本，避免不同任务的结果串用。
+   - 原有 API 调用、鉴权、超时、取消、错误处理和 DeepSeek 空响应重试机制保持不变。
+
+3. 调整统一语言处理与浮窗
+   - TRANSLATE_TEXT 支持 requestType: wordAnalysis | sentenceTranslation；缺失时默认 wordAnalysis，兼容旧调用。
+   - content.js 使用简单规则分类：出现 . ? ! ;、单词数超过 10、字符数超过 80 时使用句段翻译。
+   - 句段模式显示中文译文和可选关键术语，不显示 IPA、词性、comparison 或详细解释按钮。
+   - 原有选区 ID、请求取消、迟到响应丢弃、外部关闭、ResizeObserver 与浮窗尺寸调整逻辑保持不变。
+
+4. 版本与文档
+   - manifest.json 从 0.7.0 升级到 0.8.0。
+   - README 补充 Stage13 的流程边界、Provider 结果类型与人工验收项。
+   - 新增 Stage13 自动化测试。
+
+三、设计决策
+
+1. Word Analysis 与 Sentence Translation 不合并为一个 Skill。
+   单词学习需要音标、词性、论文语境和选词原因；句段阅读需要快速获得整体含义。合并会让句段输出过重，也会削弱单词学习的结构化结果。
+
+2. keyTerm 不是关键词提取功能。
+   默认值为 null。只有单个专业术语明显阻碍理解时才显示一个简短解释，避免把句段翻译变成词汇列表。
+
+3. 百度与 Mock 保持 quickTranslation。
+   它们属于快速翻译 Provider，即使输入是句子或段落也不伪装为 AI 的 sentenceTranslation，保证 UI 和后续 Provider 扩展能够根据结果结构而非服务名称判断行为。
+
+4. 不修改 vocabularyEntries。
+   翻译、关键术语和 AI 分析均为运行时信息。保留既有数据结构避免迁移，也让生词本继续只承担词条收集职责。
+
+四、静态验证结果
+
+已通过：
+- sentence-translation-skill.js、translation-provider.js、gemini-context-provider.js、deepseek-context-provider.js、background.js、content.js 的 Node 语法检查。
+- Stage6 至 Stage13 的 Node 回归测试。
+- Stage13 Schema 对非空翻译、keyTerm:null、严格 keyTerm 对象、额外字段、数组和空字段的校验。
+- Gemini 与 DeepSeek 的 Sentence Translation Prompt、JSON-only 约束与 Schema 路由检查。
+- 百度与 Mock 保持 quickTranslation、Word 与 Sentence 缓存隔离、旧存储字段未改变的源码检查。
+
+需要真实 Chrome 验证：
+- 划选完整句子和段落后，浮窗立即出现并异步显示 Gemini/DeepSeek 的句段译文。
+- 划选 reinforcing、reinforcing effect 后仍进入 Word Analysis。
+- 长译文与关键术语在可调整尺寸浮窗中换行、内部滚动和视口边界修正正常。
+- 快速连续划词、滚动、关闭浮窗、Esc、外部点击及 resize 后，旧响应不会污染新选区。
+- 百度、Mock、Gemini、DeepSeek 四种模式在真实配置下的显示边界正确。
+- 生词保存、右键入口、状态三态和 popup 的查看、删除、打开来源功能继续正常。
+
+五、当前架构摘要
+
+用户划词
+-> content.js 获取选区与上下文快照，并用固定启发式确定 requestType
+-> 后台并行处理生词状态查询与 TRANSLATE_TEXT
+-> Gemini/DeepSeek 按 requestType 调用对应 Skill；百度/Mock 保持快速翻译
+-> content.js 按 resultType 渲染 Word Analysis、Sentence Translation 或 quickTranslation
+-> 保存操作仍由 background.js 去重后写入 chrome.storage.local
+-> popup.js 继续读取 vocabularyEntries
+
+六、已知限制
+
+- 选择分类是简单启发式规则，短句但无标点时可能仍按 Word Analysis 处理；本阶段不引入复杂 NLP。
+- AI 输出虽然经过严格结构校验，仍可能存在翻译或术语解释质量问题。
+- Sentence Skill 指令允许极少情况下解释两个术语，但 Stage13 最小 UI 与 Schema 固定只接收一个；Provider 会要求模型选择最影响理解的一个。
+- AI 结果和缓存不持久化，service worker 休眠或扩展重载后会消失。

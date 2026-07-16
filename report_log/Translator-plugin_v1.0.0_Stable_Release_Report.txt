@@ -1,0 +1,152 @@
+Translator-plugin v1.0.0 Stable Release Report
+
+一、发布背景
+
+Translator Plugin Chrome 版已经完成从本地生词本、划词浮窗、AI/翻译 Provider、两层 Word Analysis、Sentence Translation、独立生词本、语境翻译、高亮和句子边界修复的核心闭环。本次发布不是新增功能，而是整理当前 Chrome 版为首个稳定用户可用版本。
+
+二、为什么从 0.x 升级到 1.0.0
+
+0.x 阶段用于连续验证交互、Provider 架构、AI Skill、保存链路和生词本体验。当前版本已经达到“Chrome 版核心功能基本完善，可供真实用户日常使用和收集反馈”的状态，因此升级为 v1.0.0。
+
+该版本不表示完美、零 Bug、支持所有网页或所有 PDF。它表示主要产品闭环已完成，适合作为首个用户可用稳定版本。
+
+三、当前架构摘要
+
+用户在网页中划选文本后，content.js 提取 selection、contextSentence 和页面信息，显示 fixed 可 resize 浮窗。background.js 负责本地状态查询、统一 Provider 调度、保存去重、异步语境翻译和打开来源。Provider Framework 统一调度 Gemini、DeepSeek、百度和 Mock。词条持久化在 chrome.storage.local 的 vocabularyEntries 中。独立生词本页面读取本地数据并提供搜索、排序、删除和打开来源。
+
+四、核心功能清单
+
+1. 无缝划词浮窗
+   - 划选后自动显示。
+   - 无需复制、快捷键或切换窗口。
+   - fixed 定位、resize、内部滚动。
+   - 支持外部点击、Esc 和关闭按钮。
+   - 旧请求取消和迟到响应隔离。
+
+2. Word Analysis
+   - 快速层：word、lemma、phonetic、partOfSpeech、meaning。
+   - 详细层：简洁 meaningInSentence 和可选 comparison。
+   - comparison 只提供核心语义区别。
+   - 不包含 academicMeaning、wordChoiceReason 或作者意图分析。
+
+3. Sentence Translation
+   - 自动识别句子或段落。
+   - 输出自然中文翻译。
+   - 保留专业术语和原文逻辑。
+   - 必要时显示一个关键术语。
+   - 与 Word Analysis 使用独立 Skill。
+
+4. Provider Framework
+   - 支持 Gemini、DeepSeek、百度和 Mock。
+   - 支持 Provider 切换。
+   - 包含缓存、超时、错误处理、取消和请求生命周期控制。
+
+5. 生词本
+   - 独立生词本标签页。
+   - 保存原始 word、lemma、音标、词性、简短释义。
+   - 保存英文语境、中文语境译文、来源和时间。
+   - 英文语境中安全高亮查询词。
+   - contextTranslation 保存后异步生成并持久化。
+   - 相同语境翻译复用。
+   - 旧词条兼容。
+   - 搜索、random / recent / alphabetical 排序。
+   - 同一次 Chrome 会话内随机顺序稳定。
+   - 删除和打开来源。
+
+6. 论文文本边界修复
+   - 数字小数点保护，例如 4.0、95.5。
+   - 有限高频学术缩写保护，例如 Fig.、Eq.、Ref.、Sec.、No.、e.g.、i.e.、et al.、vs.。
+   - 明确该能力仍属于启发式句子边界判断。
+
+五、Word Analysis Skill 产品原则
+
+Word Analysis 只提供最小有效阅读支点，不替用户完成全部理解。快速层给基础词汇信息，详细层只解释该词在当前句中的具体含义。comparison 只在明显近义词语义区别存在时出现，并只说明核心区别，不输出作者心理、论文背景扩展、同义词列表或写作建议。
+
+六、Sentence Translation
+
+Sentence Translation 面向用户选择完整句子或段落时的快速理解需求。它不输出音标、词性、comparison 或详细词汇分析，也不替代 Word Analysis。它的目标是自然中文译文、专业术语和逻辑关系的保留。
+
+七、Provider Framework
+
+Provider Framework 通过统一语言处理入口管理百度快速翻译、DeepSeek AI 语境解析、Gemini AI 语境解析和 Mock。Gemini/DeepSeek 提供 Word Analysis 与 Sentence Translation，百度/Mock 保持 quickTranslation。Provider 处理 API 调用、鉴权、缓存、超时、取消和错误映射；Skill 负责模型行为约束和 Schema。
+
+八、生词本完整闭环
+
+用户可以从浮窗或右键入口保存词条。后台按 word + contextSentence + pageUrl 去重，同一个词允许多个语境。独立生词本页面支持查看、搜索、排序、打开来源和删除。旧词条缺少增强字段时仍兼容显示。
+
+九、Stage18.1 语境翻译与高亮
+
+Stage18.1 增加 contextTranslation 可选字段。保存不等待翻译完成，后台异步补写；同一 pageUrl + contextSentence 会复用已有译文或共享运行中的 Provider 任务。生词本英文语境使用安全 DOM fragment 高亮原始查询词，不使用未转义 innerHTML。
+
+十、Stage18.2 句子边界修复
+
+Stage18.2 修复数字小数点和有限学术缩写中的句点误判，避免 Industry 4.0 一类语境被截断。该修复影响 Word Analysis、Sentence Translation、右键保存、生词保存和 contextTranslation 的共同 contextSentence 来源。
+
+十一、真实 Chrome 已确认的功能
+
+基于用户现有反馈，已确认：
+
+- 划词翻译可用。
+- Word Analysis 信息层级可用。
+- Sentence Translation 可用。
+- 浮窗 fixed / resize 可用。
+- 生词本独立页面可用。
+- 原词高亮可用。
+- contextTranslation 异步保存与显示可用。
+- 4.0 等句子边界修复后可提取完整语境。
+
+十二、自动化和静态测试结果
+
+已执行并通过：
+
+- 所有顶层 JavaScript 的 node --check。
+- Stage6 至 Stage18.2 全部测试。
+- Stage18、Stage18.1、Stage18.2 专项测试。
+- manifest.json UTF-8 / JSON.parse。
+- manifest 版本为 1.0.0。
+- git diff --check。
+
+十三、当前限制
+
+- Chrome 内置 PDF Viewer 当前不支持无缝划词。
+- WPS PDF 插件仍属于下一阶段可行性验证，不属于 v1.0.0。
+- 不支持 Windows 全系统全局划词。
+- 不做智能复习、间隔重复、打卡、词根和自动出题。
+- 生词本当前连续下拉渲染，没有传统分页。
+- 词条数量非常大时，未来可考虑前端分批渲染或虚拟列表。
+- 旧词条不会在打开生词本时自动批量补译。
+- AI 输出可能存在误差。
+- 句子边界仍是有限启发式，不是完整 NLP 解析。
+- DeepSeek 与 Gemini 的语言质量可能存在差异。
+- Provider 能力依赖用户配置、网络和对应服务状态。
+
+十四、仍未完全覆盖的边界
+
+- Provider 失败时的所有真实浏览器生命周期。
+- 数千词条下的性能。
+- 所有可能的英语缩写。
+- Chrome PDF。
+- WPS PDF。
+- Windows 全系统划词。
+
+十五、安全和敏感信息检查
+
+发布前检查内容：
+
+- 未发现真实 API Key、Token、Cookie 或个人配置明文。
+- 仓库不包含用户 vocabularyEntries 实际数据或浏览记录。
+- .gitignore 已补充 .env、*.env、translationSettings*.json、vocabularyEntries*.json、chrome-storage*.json、local-storage*.json 和 user-data/。
+- API Key 相关内容仅为变量名、输入框、文档说明或请求头字段名。
+
+十六、Git commit 和 tag 信息
+
+- 目标分支：main。
+- 远程：origin https://github.com/LiliProject-sys/translator-pluguin.git。
+- 计划 commit message：release: Translator Plugin v1.0.0 stable user-ready version。
+- 计划 annotated tag：v1.0.0。
+- 计划 tag message：Translator Plugin v1.0.0 - first stable user-ready Chrome release。
+- 最终 commit hash 和 push 结果以 Git 实际执行结果及最终回复为准；如果将最终 hash 写入本报告并纳入同一 commit，会改变该 commit hash。
+
+十七、后续方向
+
+下一阶段建议优先验证 WPS PDF 无缝划词可行性。其次，根据真实用户反馈继续优化大量词条渲染、Provider 失败提示、Word Analysis 质量和句子边界启发式。

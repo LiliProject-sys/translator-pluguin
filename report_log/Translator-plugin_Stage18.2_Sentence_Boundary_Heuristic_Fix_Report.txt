@@ -1,0 +1,106 @@
+Translator-plugin Stage18.2 Sentence Boundary Heuristic Fix Report
+
+一、Bug 现象
+
+真实 Chrome 使用中发现，用户在论文句子中保存单词时，contextSentence 可能从错误位置开始。例如：
+
+Industry 4.0 has revolutionized manufacturing by driving digitization and shifting the paradigm toward additive manufacturing (AM).
+
+现有逻辑可能把 4.0 中的句点当成句末，导致保存语境从 “0 has revolutionized...” 开始。
+
+二、根本原因
+
+content.js 的 extractSentence() 只使用 SENTENCE_BOUNDARY_PATTERN = /[.?!;]/ 判断句末。向前扫描、向后扫描以及包含句末标点的判断都直接使用该正则，没有区分数字内部小数点或学术缩写中的句点。
+
+三、修改文件
+
+1. content.js
+   - 新增 isSentenceBoundary() 统一边界判断。
+   - 新增 isDecimalPoint() 保护数字内部小数点。
+   - 新增 isProtectedAbbreviationPeriod() 及相关 helper 保护小型学术缩写白名单。
+   - extractSentence() 的向前和向后扫描统一调用 isSentenceBoundary()。
+
+2. manifest.json
+   - 版本从 0.12.0 升级到 0.12.1。
+
+3. README.md
+   - 增加 Stage18.2 说明和人工验收项。
+
+4. tests/stage18_2-sentence-boundary-heuristic.test.js
+   - 新增数字小数点、学术缩写和真正句末回归测试。
+
+四、当前句子提取调用链
+
+用户划词或右键保存时：
+
+getSelectionContext()
+-> getNearbyText(range)
+-> extractSentence(text, selectionStart, selectionEnd)
+-> contextSentence
+-> Word Analysis / Sentence Translation / SAVE_VOCABULARY_ENTRY / Stage18.1 contextTranslation
+
+五、数字小数点规则
+
+当候选句点 "." 的前一个字符和后一个字符都是数字时，该句点不是句末。
+
+示例：
+- Industry 4.0 has...
+- accuracy reached 95.5%...
+- version 2.1 supports...
+
+若是 Version 4.0. The next sentence...，4 和 0 中间的点被保护，0 后面的第二个点仍是句末。
+
+六、学术缩写白名单
+
+当前白名单保持小型：
+
+- 单 token：Fig. / Eq. / Ref. / Sec. / No. / vs.
+- 多句点：e.g. / i.e.
+- 多 token：et al.
+
+匹配忽略大小写，只影响句子边界判断，不修改原文。Fig./Eq./Ref./Sec./No. 主要保护后面跟编号或类似 S1 的场景，降低把真正句尾同形字符串误保护的风险。
+
+七、为什么没有重构到 Intl.Segmenter
+
+本阶段是小型 bugfix，目标是修复明确可复现的论文阅读场景。Intl.Segmenter、NLP 或第三方分句库会扩大实现范围、兼容性和测试成本，也不能直接解决 DOM 选区与复杂网页结构问题。因此本阶段只在现有扫描算法上增加可维护 helper。
+
+八、测试结果
+
+已静态验证：
+
+- 数字内部小数点不会切句：4.0、95.5、1.2、3.4。
+- 双点场景正常：Version 2.0. 中内部点不切，第二个点切句。
+- 学术缩写保护：Fig. 2、Eq. 3、Ref. 12、Sec. 4、No. 5、e.g.、i.e.、et al.、vs.。
+- 真正句末仍正常切分：result. The next sentence。
+- 普通句子切分不回归。
+
+需要真实 Chrome 验收：
+
+- Industry 4.0。
+- 95.5%。
+- Fig. 2。
+- e.g.。
+- et al.。
+- Version 2.0. Next sentence。
+- 保存后生词本英文语境和中文 contextTranslation 使用完整句子。
+
+九、对现有功能影响
+
+Word Analysis、Sentence Translation、右键保存、生词保存和 Stage18.1 contextTranslation 都会受益于更准确的 contextSentence。Provider、Skill、storage 数据结构、生词本 UI、排序和随机顺序均未改变。
+
+十、已知限制
+
+- 仍是启发式分句，不是完整自然语言句法解析。
+- 缩写白名单很小，不覆盖所有英文缩写。
+- 复杂 DOM、PDF、Canvas、扫描文本和特殊阅读器仍可能无法提供准确上下文。
+- 某些罕见同形缩写在句尾仍可能需要未来按案例调整。
+
+十一、版本变化
+
+- 上一版本：0.12.0
+- 当前版本：0.12.1
+- 当前阶段：Stage18.2 Sentence Boundary Heuristic Fix
+
+十二、回退方案
+
+所有新规则集中在 content.js 的边界 helper。如果某条缩写保护产生误判，可单独从白名单或 helper 中移除。不涉及 vocabularyEntries 或已保存用户数据迁移。

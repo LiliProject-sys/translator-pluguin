@@ -174,7 +174,10 @@ function testProvider(provider) {
       return;
     }
     if (response.resultType === "contextAnalysis" && response.analysis) {
-      showStatus(statusId, `测试成功：${response.analysis.contextualMeaning}`, false);
+      const summary = response.analysis.academicMeaning
+        || response.analysis.contextualMeaning
+        || "语境解析已返回";
+      showStatus(statusId, `测试成功：${summary}`, false);
     } else {
       showStatus(statusId, `测试成功：${response.translatedText}`, false);
     }

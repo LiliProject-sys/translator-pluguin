@@ -1,0 +1,117 @@
+Translator-plugin Stage18.1 Vocabulary Context Recall Development Report
+
+一、本阶段目标
+
+Stage18.1 的目标是在 Stage18 独立生词本基础上增强“语境回忆”。用户保存词条后，生词本页面应帮助用户重新看到原句中的查询词，并在可能时显示原句中文译文。
+
+本阶段解决两个实际使用问题：
+
+1. 生词本中只有英文原句时，重新复习时不容易快速定位当初查询的词。
+2. 用户保存词条后，希望稍后回看时能直接看到整句大意，但保存动作不应等待翻译完成。
+
+本阶段不修改 Word Analysis Skill、Sentence Translation Skill、Gemini/DeepSeek/Baidu/Mock Provider、AI Prompt、排序规则、popup 结构或浮窗生命周期。
+
+二、修改文件
+
+1. manifest.json
+   - 版本从 0.11.0 升级到 0.12.0。
+
+2. background.js
+   - 将 contextTranslation 纳入可选补充字段。
+   - SAVE_VOCABULARY_ENTRY 响应新增 entryId 和 hasContextTranslation。
+   - 新增 GENERATE_VOCABULARY_CONTEXT_TRANSLATION 消息。
+   - 新增同语境译文复用和运行中任务共享。
+   - 翻译完成后补写所有相同 pageUrl + 规范化 contextSentence 且缺少译文的现存词条。
+
+3. content.js
+   - Sentence Translation 成功且仍属于当前选区时，将 translation 写入当前保存快照。
+   - 句段 quickTranslation 成功且对应当前选区时，可写入 contextTranslation。
+   - 保存成功后，如果词条缺少 contextTranslation，则异步触发后台补译，不等待结果再显示保存成功。
+
+4. vocabulary.js
+   - 英文原句改为 DocumentFragment 安全渲染。
+   - 新增字面匹配和自定义英文边界检查，避免 art 高亮 partial 内部子串。
+   - 新增 contextTranslation 展示和搜索字段。
+
+5. vocabulary.css
+   - 新增克制的查询词高亮样式和中文语境译文样式。
+
+6. README.md
+   - 增加 Stage18.1 说明、contextTranslation 数据兼容、保存不等待翻译、同语境复用、安全高亮和手动验收项。
+
+7. tests/stage18_1-vocabulary-context-recall.test.js
+   - 新增 Stage18.1 专项静态与逻辑测试。
+
+三、实现方案
+
+保存仍然即时完成。content script 收到保存响应后，根据 entryId 和 hasContextTranslation 决定是否发送 GENERATE_VOCABULARY_CONTEXT_TRANSLATION。后台在消息处理函数中 await 完整翻译与 storage 写回，再 sendResponse，避免 MV3 service worker 留下无人等待的悬空 Promise。
+
+Provider 调用前先检查是否已有相同 pageUrl + 规范化 contextSentence 的非空 contextTranslation。如果存在，直接复用该译文。若没有，再按相同语境 key 共享运行中的异步任务。同一句中保存多个不同单词时，最多调用一次 Provider。
+
+高亮只在 vocabulary 页面渲染时发生，不写回 storage。实现不使用 innerHTML，而是通过 createTextNode、mark 和 DocumentFragment 拼装。匹配先做大小写不敏感的字面查找，再检查匹配前后字符是否为允许边界；英文、数字、撇号和连字符都视为单词内部字符，避免错误切开其它英文单词、连字符词和撇号词形。
+
+四、Bug 与经验记录
+
+1. 异步补译不能只按 entryId 去重。同一句里保存多个不同词时，entryId 不同但 contextSentence 相同，若不按语境共享任务，会重复消耗 Provider 请求。
+
+2. 迟到的 Sentence Translation 或 quickTranslation 不能写入新选区快照。content.js 写入 contextTranslation 前必须检查 selectionId、quickRequestId、当前浮窗、当前 snapshot 对象和 requestType。
+
+3. 高亮不能依赖简单 \b。英文阅读中常见连字符、撇号和数字相邻字符，简单 \b 容易误判边界。本阶段改用字面匹配加自定义边界函数。
+
+4. contextTranslation 是可选辅助字段，不应参与重复身份判断、三态判断或随机顺序维护。
+
+五、测试结果
+
+已静态验证：
+
+- manifest.json 版本更新到 0.12.0。
+- background.js 新增保存响应 entryId/hasContextTranslation。
+- background.js 新增 GENERATE_VOCABULARY_CONTEXT_TRANSLATION。
+- contextTranslation 不参与重复身份判断。
+- 同语境译文可复用，运行中任务按 pageUrl + contextSentence 共享。
+- vocabulary.js 使用安全 DOM fragment 渲染，不拼接原句 innerHTML。
+- 高亮测试覆盖大小写、短语、多次出现、HTML 字符串、RegExp 特殊字符、英文边界和跳过整句场景。
+
+需要真实 Chrome 验证：
+
+- 真实 Provider 下保存普通单词后，按钮立即成功，稍后生词本出现中文语境。
+- 同一句保存多个不同词时实际只触发一次语境翻译。
+- 生词本打开时 storage.onChanged 能实时刷新译文且不打乱随机顺序。
+- 翻译失败、取消、关闭浮窗、删除词条等真实浏览器生命周期。
+
+六、当前架构摘要
+
+词条基础字段仍为 id、word、contextSentence、pageTitle、pageUrl、createdAt。Stage18/18.1 只增加可选增强字段 lemma、phonetic、partOfSpeech、meaning、contextTranslation。
+
+保存入口仍统一进入 background.js 的 SAVE_VOCABULARY_ENTRY。重复规则仍为 word + contextSentence + pageUrl。contextTranslation 只作为补充字段保存，不改变既有身份规则。
+
+独立生词本页面只读取并展示已有数据，不主动批量调用 AI。
+
+七、已知限制
+
+- 不为打开生词本时的旧词条批量翻译，避免 API 配额不可控。
+- contextTranslation 依赖当前 active Provider，Provider 失败时不会自动切换其它 Provider。
+- 高亮规则是保守启发式，过长选区、整句选区或占比过高选区会跳过高亮。
+- 语境译文不会覆盖已有非空译文。
+
+八、版本变化
+
+- 当前版本：0.12.0
+- 上一版本：0.11.0
+- 当前阶段：Stage18.1 Vocabulary Context Recall
+- 报告格式：UTF-8 TXT
+- 报告路径：D:\Project_Experimental\Translator_Plugin\report_log\Translator-plugin_Stage18.1_Vocabulary_Context_Recall_Development_Report.txt
+
+九、后续真实验收补充
+
+Stage18.1 后续真实使用确认：
+
+- 原词高亮成功，生词本英文语境中能够定位保存时的查询词。
+- contextTranslation 可在保存后异步写入。
+- 生词本页面可以显示中文语境译文。
+
+本轮发现的新问题：
+
+- 原句提取阶段仍可能把数字或学术缩写中的句点误判为句末，例如 Industry 4.0 可能导致 contextSentence 从 “0 has...” 开始。
+- 该问题属于 content.js 句子边界启发式缺陷，不属于 Stage18.1 高亮或异步补译逻辑本身。
+- 已在 Stage18.2 中通过数字小数点保护和有限学术缩写白名单修复。
