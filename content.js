@@ -88,12 +88,6 @@ document.addEventListener("selectionchange", () => {
   if (panelPointerDown) {
     return;
   }
-
-  const selectedText = window.getSelection() ? window.getSelection().toString().trim() : "";
-
-  if (!selectedText) {
-    closeSelectionPanel();
-  }
 });
 
 document.addEventListener("keydown", (event) => {
@@ -936,9 +930,10 @@ function updatePanelStatus(button, message, isError) {
   button.textContent = message;
   button.classList.toggle("is-error", !!isError);
 
-  window.setTimeout(() => {
-    closeSelectionPanel();
-  }, isError ? 1400 : 900);
+  if (isError) {
+    button.disabled = false;
+    button.dataset.saveEnabled = "true";
+  }
 }
 
 function closeSelectionPanel() {

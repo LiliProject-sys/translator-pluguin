@@ -142,7 +142,7 @@ function testUiAndCompatibility() {
   const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "1.0.0");
+  assert.equal(manifest.version, "1.0.1");
   assert(content.includes("analysis.phonetic"));
   assert(content.includes("analysis.meaning"));
   assert(content.includes("analysis.meaningInSentence"));

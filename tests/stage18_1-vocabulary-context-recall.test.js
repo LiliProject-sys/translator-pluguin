@@ -282,7 +282,7 @@ function testStaticStage18_1Boundaries() {
   const vocabulary = fs.readFileSync(path.join(projectRoot, "vocabulary.js"), "utf8");
   const readme = fs.readFileSync(path.join(projectRoot, "README.md"), "utf8");
 
-  assert.equal(manifest.version, "1.0.0");
+  assert.equal(manifest.version, "1.0.1");
   assert(background.includes("GENERATE_VOCABULARY_CONTEXT_TRANSLATION"));
   assert(background.includes("contextTranslationTasks"));
   assert(background.includes("createVocabularyContextKey"));

@@ -8,7 +8,7 @@ const background = fs.readFileSync(path.join(projectRoot, "background.js"), "utf
 const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "1.0.0");
+assert.equal(manifest.version, "1.0.1");
 
 assert(content.includes("let currentSelectionId = 0;"));
 assert(content.includes("let detailAnalysisRequestId = 0;"));

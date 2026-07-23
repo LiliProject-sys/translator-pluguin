@@ -1,0 +1,118 @@
+Translator-plugin v1.0.1 Floating Panel Persistence Fix Report
+
+一、Bug 现象
+
+用户在划词浮窗中点击“加入生词本”后，词条可以保存成功，按钮状态也会变化。但随后浮窗会自动消失，表现得像鼠标从浮窗移回正文后触发了关闭。
+
+二、实际根因
+
+代码中没有 mouseleave、pointerleave 或 mouseout 自动关闭逻辑。实际存在两个关闭链路：
+
+1. saveCurrentSelection() 保存成功后调用 updatePanelStatus()。
+2. updatePanelStatus() 内部使用 setTimeout(() => closeSelectionPanel(), 900) 自动关闭浮窗。
+3. document selectionchange 在 selection 为空时直接 closeSelectionPanel()。点击保存按钮后，浏览器可能清空页面 selection，从而关闭浮窗。
+
+三、修改文件
+
+- content.js
+- manifest.json
+- README.md
+- tests/v1.0.1-floating-panel-persistence.test.js
+- report_log/Translator-plugin_v1.0.1_Floating_Panel_Persistence_Fix_Report.txt
+
+四、修复前关闭链路
+
+保存按钮点击后：
+
+saveCurrentSelection()
+-> SAVE_VOCABULARY_ENTRY
+-> updatePanelStatus(button, "已加入", false)
+-> setTimeout
+-> closeSelectionPanel()
+-> 清理 snapshot、request id、ResizeObserver
+-> 取消当前语言请求
+
+另一个风险链路：
+
+点击浮窗内部按钮
+-> 浏览器清空网页 selection
+-> selectionchange
+-> closeSelectionPanel()
+
+五、修复后关闭规则
+
+浮窗只在以下情况下关闭或替换：
+
+- 点击关闭按钮；
+- 按 Esc；
+- 明确点击浮窗外部；
+- document mouseup 后读取到新的有效文本选区并替换旧浮窗；
+- 页面卸载、扩展重载或浏览器自身生命周期结束。
+
+以下行为不会关闭浮窗：
+
+- 保存成功；
+- 保存失败；
+- 鼠标移出浮窗；
+- selection 变为空；
+- contextTranslation 异步任务开始或完成；
+- Detail 请求开始或完成；
+- 内部滚动；
+- resize。
+
+六、保存按钮为何不应改变浮窗生命周期
+
+保存是当前浮窗中的一个操作状态，不是浮窗生命周期结束。用户保存后仍可能需要继续查看音标、当前语境、comparison 或 Detail，也可能希望调整大小、滚动内容或返回正文继续阅读。因此保存成功只更新按钮状态，不销毁浮窗。
+
+七、内部事件隔离
+
+本阶段继续复用现有 isEventInsideSelectionPanel(event) 和 panelPointerDown 逻辑。保存按钮、Detail 按钮、关闭按钮、resize 和内部滚动仍与 document 级 mouseup/mousedown 逻辑隔离。
+
+八、timer 处理
+
+mouseupTimer 保留，仅用于 document mouseup 后延迟读取新 selection。保存状态不再使用任何调用 closeSelectionPanel() 的 timer。updatePanelStatus() 现在只更新按钮文字和样式；失败时恢复按钮可点击状态。
+
+九、自动化测试
+
+新增 tests/v1.0.1-floating-panel-persistence.test.js，覆盖：
+
+- updatePanelStatus() 不再包含 closeSelectionPanel() 或 setTimeout。
+- selectionchange 不再因空 selection 关闭浮窗。
+- selectionchange 不调用 showPanelForCurrentSelection()。
+- 保存失败路径恢复按钮可点击状态。
+- 外部点击、Esc、关闭按钮和 mouseup 延时读取新选区仍保留。
+- mouseleave / pointerleave / mouseout / blur 不参与关闭逻辑。
+
+十、回归测试
+
+需要执行：
+
+- 顶层 JavaScript node --check。
+- Stage6 至 v1.0.1 全部测试。
+- manifest.json JSON.parse。
+- git diff --check。
+
+十一、真实 Chrome 验收
+
+需要人工验证：
+
+- 点击加入生词本后鼠标移出，浮窗不消失。
+- 不点击保存时鼠标移出，浮窗不消失。
+- 保存失败后按钮可重新点击。
+- 保存后 Detail 和 resize 仍可用。
+- 外部点击、Esc、关闭按钮仍可关闭。
+- 新划选有效文本仍可替换旧浮窗。
+
+十二、已知限制
+
+本阶段只修复浮窗生命周期，不改变 Provider、Skill、生词本、句子边界、contextTranslation 或排序逻辑。
+
+十三、版本变化
+
+- 上一版本：1.0.0
+- 当前版本：1.0.1
+- 类型：patch bugfix
+
+十四、Git 状态
+
+v1.0.0 commit 和 tag 不修改。本阶段实现后不自动 commit、tag 或 push，由用户完成真实 Chrome 验收后再决定是否发布 v1.0.1。

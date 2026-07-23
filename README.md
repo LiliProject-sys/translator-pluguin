@@ -1,10 +1,30 @@
 # Translator-plugin
 
+## GitHub 私有 Beta 分发说明
+
+当前项目可作为私有 GitHub 仓库中的 Beta 测试版本分发，推荐先通过压缩包或私有仓库邀请少量用户试用。此项目尚未提交 Chrome Web Store 审核，也未提供生产级密钥保护、账号系统或云端同步。
+
+分发前建议阅读：
+
+- `PRIVACY.md`：说明插件读取、保存和发送哪些数据。
+- `SECURITY.md`：说明 API Key、本地存储和安全报告规则。
+- `docs/beta-test-guide.md`：给测试用户的安装、配置和反馈说明。
+- `docs/architecture.md`：维护者理解代码结构和数据流的入口。
+- `docs/release-checklist.md`：打包和上传前检查清单。
+
+本地打包建议使用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-extension.ps1
+```
+
+脚本会在 `release/` 目录生成用于 Chromium/Chrome 加载测试的 ZIP。生成的 ZIP、用户本地配置、个人词库导出和私密记录默认不会提交到 Git。
+
 Translator-plugin 是一个无需构建步骤的 Chrome Manifest V3 扩展。用户在普通网页中选中英文单词或短语后，浮窗会立即显示本地收录状态，并异步执行所选语言处理模式：百度快速翻译、DeepSeek/Gemini AI 两层语境解析或本地 Mock。词条仍保存到 `chrome.storage.local`。
 
 ## 项目状态
 
-当前版本：`v1.0.0`。
+当前版本：`v1.0.1`。
 
 Translator Plugin Chrome 版核心功能已基本完善，达到可供真实用户日常使用和收集反馈的稳定版本。这个版本不表示零 Bug 或支持所有网页，而是表示划词理解、生词保存、独立生词本、Provider 配置和论文阅读常见边界修复已经形成完整闭环。
 
@@ -29,8 +49,9 @@ Translator Plugin Chrome 版核心功能已基本完善，达到可供真实用�
 - Stage18：新增独立生词本页面，支持增强词条字段、搜索、随机/最近/字母排序和会话内稳定随机顺序。
 - Stage18.1：增强语境回忆，在生词本安全高亮原句中的查询词，并为原句异步补写一次性中文译文。
 - Stage18.2：修复句子边界启发式，避免把小数点和高频学术缩写中的句点误判为句末。
+- v1.0.1：修复保存词条后浮窗自动关闭的问题；保存成功后浮窗保持显示，保存失败后按钮恢复可点击以便重试。
 
-当前插件版本为 `1.0.0`。
+当前插件版本为 `1.0.1`。
 
 ## 文件结构
 
@@ -63,7 +84,7 @@ Translator Plugin Chrome 版核心功能已基本完善，达到可供真实用�
 3. 首次安装时点击“加载已解压的扩展程序”。
 4. 选择 `D:\Project_Experimental\Translator_Plugin`。
 5. 已安装旧版本时点击扩展卡片上的“重新加载”。
-6. 确认版本显示为 `1.0.0`。
+6. 确认版本显示为 `1.0.1`。
 
 项目不需要 `npm install`，不包含 React、Vue、TypeScript 或后端服务。
 
@@ -375,6 +396,12 @@ Stage18.2 针对 `content.js` 的 `contextSentence` 提取启发式做小范围�
 
 这仍然是轻量启发式，不是完整自然语言句法解析。插件没有引入 `Intl.Segmenter`、NLP 模型、第三方分句库或大型缩写数据库。普通 HTML 页面支持较好，PDF、Canvas、扫描文本和复杂阅读器仍可能无法准确提供完整上下文。
 
+## v1.0.1 浮窗持久性修复
+
+v1.0.1 修复了保存词条后浮窗自动关闭的问题。点击“加入生词本”后，按钮会显示“已加入”或“已保存”，但浮窗不会因为保存成功、鼠标移出、selection 变为空或异步 `contextTranslation` 任务而关闭。用户可以继续查看 Word Analysis、点击 Detail、滚动内容或调整浮窗大小。
+
+保存失败时浮窗同样保持显示，按钮会恢复为可点击状态，允许用户重试。浮窗仍会在明确点击关闭按钮、按 Esc、点击浮窗外部或重新划选有效文本时关闭或替换。
+
 ## 两层语境解析
 
 Stage9 已实现两层语境解析，但仍保持运行时展示，不写入生词本：
@@ -436,7 +463,7 @@ Gemini 和 DeepSeek 共同使用 `sentence-translation-skill.js` 中的 `sentenc
 
 ## 手动验收清单
 
-- 重新加载后确认 Manifest V3 和版本 `1.0.0`。
+- 重新加载后确认 Manifest V3 和版本 `1.0.1`。
 - 划选 `biosensing` 后滚动页面，确认浮窗保持在当前视口位置。
 - Detail 加载期间滚动页面，确认请求继续并正常显示结果。
 - 在 Detail 长内容区域内部滚动，确认浮窗不关闭。

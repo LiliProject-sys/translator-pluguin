@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Translator-plugin",
   "description": "使用快速翻译或 AI 理解划选单词、句子和段落，并保存英文词语及上下文。",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "permissions": [
     "contextMenus",
     "storage",

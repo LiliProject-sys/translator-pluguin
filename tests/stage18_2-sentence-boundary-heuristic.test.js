@@ -149,7 +149,7 @@ function testStaticStage18_2Boundaries() {
   const background = fs.readFileSync(path.join(projectRoot, "background.js"), "utf8");
   const vocabulary = fs.readFileSync(path.join(projectRoot, "vocabulary.js"), "utf8");
 
-  assert.equal(manifest.version, "1.0.0");
+  assert.equal(manifest.version, "1.0.1");
   assert(content.includes("function isSentenceBoundary"));
   assert(content.includes("function isDecimalPoint"));
   assert(content.includes("function isProtectedAbbreviationPeriod"));

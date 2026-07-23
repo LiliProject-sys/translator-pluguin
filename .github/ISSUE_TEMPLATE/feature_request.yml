@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest an improvement for Translator-plugin
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What reading or vocabulary workflow should this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Floating panel
+        - Word Analysis
+        - Sentence Translation
+        - Vocabulary book
+        - Provider settings
+        - Packaging or documentation
+        - Other
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes

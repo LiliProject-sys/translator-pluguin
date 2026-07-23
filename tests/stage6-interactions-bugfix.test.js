@@ -181,7 +181,7 @@ async function testOutputFailures() {
 async function testSafeHttpDiagnostics() {
   const targetText = "SecretWord";
   const contextSentence = "The private context contains SecretWord and should not be logged.";
-  const apiKey = "private-api-key";
+  const apiKey = "fake-provider-key-for-tests";
   const provider = createProvider(async () => createResponse(400, {
     error: {
       status: "INVALID_ARGUMENT",
@@ -249,7 +249,7 @@ function testVocabularyShapeAndSourceInvariants() {
   assert.equal(providerSource.includes("generationConfig"), false);
   assert.equal(providerSource.includes("candidates"), false);
   assert(background.includes("safeError.diagnostics"));
-  assert.equal(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8").includes('"version": "1.0.0"'), true);
+  assert.equal(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8").includes('"version": "1.0.1"'), true);
   assert.equal(fs.readFileSync(path.join(projectRoot, "options.js"), "utf8").includes('"gemini-3.5-flash"'), true);
 }
 

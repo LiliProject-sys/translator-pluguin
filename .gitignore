@@ -1,5 +1,9 @@
 # Local delivery documents and render QA artifacts
 *.docx
+*.zip
+*.crx
+*.xpi
+release/
 docx_render_check/
 stage*_docx_render_check/
 *_render_check/
@@ -11,14 +15,24 @@ stage*_docx_render_check/
 Thumbs.db
 *.tmp
 *.log
+node_modules/
+dist/
+build/
 
 # Local credentials, user data exports, and private test fixtures
 .env
 .env.*
+!.env.example
 *.env
 *.local
+secrets/
+credentials/
+private/
 translationSettings*.json
 vocabularyEntries*.json
 chrome-storage*.json
 local-storage*.json
 user-data/
+
+# Private project notes that are not part of distributable source
+重要记录/

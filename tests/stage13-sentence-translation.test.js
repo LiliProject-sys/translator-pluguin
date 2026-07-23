@@ -110,7 +110,7 @@ function testUiAndProviderBoundaries() {
   const background = fs.readFileSync(path.join(projectRoot, "background.js"), "utf8");
   const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
-  assert.equal(manifest.version, "1.0.0");
+  assert.equal(manifest.version, "1.0.1");
   assert(content.includes("function detectSelectionRequestType"));
   assert(content.includes("wordCount > 10"));
   assert(content.includes("text.length > 80"));
