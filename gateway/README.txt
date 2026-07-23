@@ -39,7 +39,13 @@ Translator-plugin Gateway Beta 本地服务说明
 注意：
 - 127.0.0.1 只供本机 Chrome 插件使用；
 - 朋友远程使用需要未来部署 Cloud Run；
-- Cloud Run 不使用本地启动脚本，也不读取本地 .env，而是使用平台环境变量。
+- Cloud Run Source Deploy 应在仓库的 gateway/ 目录执行，gateway/ 是 Docker build context；
+- Dockerfile 的 COPY 路径均以 gateway/ 为根，不依赖仓库根目录；
+- 容器启动后监听 0.0.0.0，并读取 Cloud Run 注入的 PORT，默认回退 8080；
+- Cloud Run 不使用本地启动脚本，也不读取本地 .env，而是使用平台环境变量；
+- BETA_ACCESS_TOKEN 与 GEMINI_API_KEY 将来通过 Secret Manager 或等价安全方式注入；
+- GEMINI_MODEL 将来通过 Cloud Run 平台环境变量设置；
+- 当前阶段只完成部署准备与审计，尚未实际部署 Cloud Run。
 
 隐私约束：
 - Token 只通过 Authorization: Bearer 发送；

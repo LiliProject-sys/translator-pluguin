@@ -1,3 +1,7 @@
+.env
+.env.*
+!.env.example
+.venv/
 __pycache__/
 **/__pycache__/
 *.pyc
@@ -6,6 +10,11 @@ __pycache__/
 **/.pytest_cache/
 .coverage
 htmlcov/
-.env
-.venv/
+.git/
+.gitignore
 *.log
+tests/
+contracts/
+README.txt
+*.ps1
+*.cmd
