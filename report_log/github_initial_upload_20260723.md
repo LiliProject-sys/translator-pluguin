@@ -1,124 +1,184 @@
-# Translator-plugin GitHub 当前版本上传准备报告
+# Translator-plugin GitHub 当前版本上传报告
 
 生成日期：2026-07-23
 
 项目目录：`D:\Project_Experimental\Translator_Plugin`
 
-当前插件版本：`1.0.1`
+远程仓库：`https://github.com/LiliProject-sys/translator-pluguin.git`
 
-目标仓库：`origin https://github.com/LiliProject-sys/translator-pluguin.git`
+仓库可见性：保持现有 Public，不新建、不改名、不修改可见性。
 
-## 1. 本次目标
+## 1. 项目与版本
 
-为当前 Translator-plugin Chrome 扩展准备私有 GitHub 仓库上传材料，包括安全检查、忽略规则、维护文档、Beta 测试文档、可重复打包脚本、压缩包检查和上传前报告。
-
-本次不新增产品功能，不修改 Provider、Skill、浮窗、popup、生词本、storage 数据结构或 Chrome 权限。
-
-## 2. 已完成
-
-- 增强 `.gitignore`，排除本地压缩包、发布目录、凭据目录、私密记录、构建产物、用户本地数据和渲染产物。
-- 新增 `PRIVACY.md`，说明选区、上下文、来源、API Key、本地存储和外部 Provider 请求。
-- 新增 `SECURITY.md`，说明敏感数据提交规则、API Key 风险和安全问题反馈方式。
-- 新增 `CONTRIBUTING.md`，说明开发边界、测试要求和打包方式。
-- 新增 `CHANGELOG.md`，记录当前私有 Beta 候选版本和 v1.0.0 基线。
-- 新增 `docs/architecture.md`，说明 Manifest V3 结构、模块职责、数据流和 storage key。
-- 新增 `docs/beta-test-guide.md`，说明用户从 ZIP 解压、加载、配置 Provider 和反馈问题的流程。
-- 新增 `docs/browser-compatibility.md`，说明 Chrome、Edge、其它 Chromium、Firefox 和 Safari 的兼容状态。
-- 新增 `docs/release-checklist.md`，作为后续打包和 GitHub 上传前检查清单。
-- 新增 GitHub issue templates：bug report、feature request 和 issue template config。
-- 新增 `scripts/package-extension.ps1`，用于生成可加载到 Chrome 的扩展 ZIP，并检查 ZIP 内容。
-- 更新 `README.md`，补充 GitHub 私有 Beta 分发说明和文档入口。
-
-## 3. 安全扫描结果
-
-工作区敏感值扫描结果：
-
-- 未发现形似真实 Google API Key、OpenAI key、Bearer token 或长 secret 的值。
-- 命中 3 处测试占位值：
-  - `tests/stage6-interactions-bugfix.test.js` 中的 `test-api-key`
-  - `tests/stage6-interactions-bugfix.test.js` 中的 `private-api-key`
-- 上述内容为测试夹具，不是可用凭据。
-
-Git 历史扫描结果：
-
-- 当前历史包含 2 个提交。
-- 历史中只命中同一组测试占位值，未发现真实密钥。
-
-私密目录处理：
-
-- 根目录存在 `重要记录/`，包含个人阶段记录，不作为分发源代码提交。
-- 已加入 `.gitignore`。
-
-## 4. 上传阻断项
-
-检测到 `gh` 未安装或不可用，因此本次没有执行 GitHub push。
-
-原因：
-
-- 无法确认当前 GitHub 登录账号。
-- 无法确认远程仓库可访问性和私有可见性。
-- 根据上传约束，存在此类阻断项时应停止 push，只完成本地准备。
-
-## 5. 本地打包状态
-
-已添加可重复打包脚本：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\package-extension.ps1
-```
-
-脚本会输出：
-
-- ZIP 路径
-- manifest 版本
-- ZIP entry 数量
-- SHA-256
-
-本次已生成并检查：
-
-- ZIP 路径：`D:\Project_Experimental\Translator_Plugin\release\Translator-plugin-v1.0.1-chromium.zip`
+- 项目名称：Translator-plugin
+- 当前分支：`main`
 - manifest 版本：`1.0.1`
+- Manifest Version：`3`
+- 上传来源：仅使用当前项目目录。
+- License：当前 Public 仓库尚未确定 License，需由用户后续决定。
+
+版本交叉检查：
+
+- `manifest.json`：`1.0.1`
+- `README.md`：当前版本说明为 `v1.0.1`
+- `CHANGELOG.md`：包含 `1.0.1 - Private Beta Candidate`
+- v1.0.1 开发报告：当前版本为 `1.0.1`
+- 旧 Stage 报告中的 `0.x` 和 `1.0.0` 为历史记录，不作为当前版本声明。
+
+## 2. 远程历史状态
+
+- `git fetch origin`：成功。
+- 执行前本地 HEAD：`58e259763f1d68ded0d94efcd3e71edd53f5c04c`
+- 执行前 `origin/main` HEAD：`58e259763f1d68ded0d94efcd3e71edd53f5c04c`
+- 本地与远程共同祖先：`58e259763f1d68ded0d94efcd3e71edd53f5c04c`
+- 执行前分叉检查：`0 0`，无分叉。
+- 推送方式：普通 `git push origin main`，未使用 force push 或 `--force-with-lease`。
+
+## 3. 更新文件清单
+
+新增：
+
+- `.github/ISSUE_TEMPLATE/bug_report.yml`
+- `.github/ISSUE_TEMPLATE/config.yml`
+- `.github/ISSUE_TEMPLATE/feature_request.yml`
+- `CHANGELOG.md`
+- `CONTRIBUTING.md`
+- `PRIVACY.md`
+- `SECURITY.md`
+- `docs/architecture.md`
+- `docs/beta-test-guide.md`
+- `docs/browser-compatibility.md`
+- `docs/release-checklist.md`
+- `report_log/Translator-plugin_v1.0.1_Floating_Panel_Persistence_Fix_Report.txt`
+- `report_log/github_initial_upload_20260723.md`
+- `scripts/package-extension.ps1`
+- `tests/v1.0.1-floating-panel-persistence.test.js`
+
+修改：
+
+- `.gitignore`
+- `README.md`
+- `content.js`
+- `manifest.json`
+- `tests/stage10-floating-panel-interaction.test.js`
+- `tests/stage12-skill-optimization.test.js`
+- `tests/stage13-sentence-translation.test.js`
+- `tests/stage14-word-skill-v4.1.test.js`
+- `tests/stage15-word-analysis-minimalism.test.js`
+- `tests/stage16-ui-density.test.js`
+- `tests/stage18-vocabulary-book.test.js`
+- `tests/stage18_1-vocabulary-context-recall.test.js`
+- `tests/stage18_2-sentence-boundary-heuristic.test.js`
+- `tests/stage6-interactions-bugfix.test.js`
+- `tests/stage7-deepseek-provider-framework.test.js`
+- `tests/stage8-skill2-optimization.test.js`
+- `tests/stage9-ai-skill-upgrade.test.js`
+- `tests/stage9.2-detail-lifecycle.test.js`
+
+删除：无。
+
+## 4. .gitignore 调整
+
+已增量排除：
+
+- `.env`、`.env.*`，并保留 `!.env.example`
+- `node_modules/`
+- `dist/`、`build/`
+- `release/`
+- `*.zip`、`*.crx`、`*.xpi`
+- `*.log`、`*.tmp`
+- `.agents/`、`.codex/`
+- `secrets/`、`credentials/`、`private/`
+- 浏览器 storage / 用户词库导出
+- `stage*_docx_render_check/` 和其它 render check 目录
+- 私密记录目录 `重要记录/`
+
+未排除插件运行所需源码、tests、README、Provider、GitHub 文档、必要脚本和有价值的 TXT/Markdown 开发报告。
+
+## 5. 安全扫描结果
+
+工作区扫描：
+
+- 未发现真实 API Key、Token、Cookie、用户个人数据或本地 storage 导出。
+- 命中 3 处测试占位 key，均位于 `tests/stage6-interactions-bugfix.test.js`。
+
+本地 Git 历史扫描：
+
+- 历史提交数：2
+- 仅发现测试占位 key。
+- 旧公开历史中存在 `private-api-key` 字符串，但它位于测试文件，格式不符合真实 Provider Key，当前工作区已改为 `fake-provider-key-for-tests`。
+
+远程 `origin/main` 公开历史扫描：
+
+- 历史提交数：2
+- 仅发现同一组测试占位 key。
+- 未发现真实密钥或用户数据。
+
+暂存区扫描：
+
+- 仅发现测试占位 key。
+- 未发现非测试敏感命中。
+
+发布包扫描：
+
+- 通过。
+- 未发现敏感信息。
+
+## 6. 发布包
+
+本地已生成但未提交：
+
+- 路径：`D:\Project_Experimental\Translator_Plugin\release\Translator-plugin-v1.0.1-chromium.zip`
 - ZIP entry 数量：`22`
-- SHA-256：`B7E1DF01F0F19522CAB1A5BD2777D53CEF6CA118E02FF12F73728F5FEA750211`
-- ZIP 内容检查：通过，`manifest.json` 位于根目录，未包含 `.git`、测试、报告、私密记录、发布目录或二进制发布产物。
-- ZIP 敏感值扫描：通过。
+- SHA-256：`8F557BEDC3A36B14147B8EB5B167C5E52FEFA8CC2F3B800C27088A339A1E743F`
 
-ZIP 文件和 `release/` 目录默认被 `.gitignore` 排除，不建议提交到 GitHub 源码仓库。
+ZIP 根目录包含 `manifest.json`。ZIP 未包含 `.git`、tests、report_log、私密记录、release、node_modules、docx、截图或本地配置。
 
-## 6. 已执行检查
+## 7. 检查结果
 
-- `manifest.json` UTF-8 / `JSON.parse()`：通过，`manifest_version` 为 3，名称为 `Translator-plugin`，版本为 `1.0.1`。
-- Manifest 引用文件存在性检查：通过。
-- 顶层 JavaScript `node --check`：通过。
-- `tests/` 下现有 Node 回归测试：通过。
-- `git diff --check`：通过；仅有 Windows CRLF 提示，无空白错误。
-- 工作区敏感值扫描：通过；仅发现测试占位 key。
-- Git 历史敏感值扫描：通过；仅发现测试占位 key。
-- ZIP 敏感值扫描：通过。
+自动测试：
 
-## 7. 需要人工执行的 GitHub 步骤
+- `tests/` 下现有 Node 测试全部通过。
 
-1. 安装 GitHub CLI：
+静态检查：
 
-```powershell
-winget install --id GitHub.cli
-```
+- `manifest.json` UTF-8 / `JSON.parse()`：通过。
+- Manifest V3：通过。
+- Manifest 引用文件存在：通过。
+- 递归 `node --check`：通过，共检查 30 个 JS 文件。
+- message type 静态检查：通过。
+- storage key 静态检查：通过，包含 `vocabularyEntries`、`translationSettings`、`vocabularySortMode`、`vocabularyRandomOrder`。
+- README 关键路径与命令存在性检查：通过。
+- `git diff --check`：通过，仅有 Windows CRLF 提示。
+- `git diff --cached --check`：通过。
 
-2. 登录 GitHub：
+人工 GUI 验收：
 
-```powershell
-gh auth login
-gh auth status
-```
+- 尚未进行人工 GUI 验收。
 
-3. 确认远程仓库为私有仓库。
+## 8. Git 提交与推送
 
-4. 重新执行本报告中的安全检查和项目测试。
+第一个提交：
 
-5. 用户确认后再执行 commit 和 push。
+- Commit：`c781ed44d99f4aa6fd64b6b14c5181abe76cfa91`
+- Message：`chore: publish Translator Plugin v1.0.1`
+- Push：成功推送到 `origin/main`
 
-不要创建 tag、release 或公开仓库，除非后续明确要求。
+第二个提交用于修正本报告的实际上传状态：
 
-## 8. 当前结论
+- Commit：以 Git 历史和最终执行摘要中的实际 hash 为准。
+- Message：`docs: update GitHub upload report`
 
-本地 GitHub 上传准备材料已完成；上传本身未执行，阻断原因为 `gh` 不可用。当前工作区仍需在用户确认后完成 Git commit 和 push。
+未创建 tag。
+
+未创建 GitHub Release。
+
+未执行 force push。
+
+## 9. 已知限制与未完成事项
+
+- 当前 Public 仓库尚未确定 License。
+- 尚未进行本轮 Chrome 人工 GUI 验收。
+- Chrome PDF Viewer、Canvas、扫描文本和复杂阅读器仍可能无法正确提供选区上下文。
+- Provider 能力依赖用户本地 API Key、网络状态、额度和外部服务可用性。
+- 本地 ZIP 仅作为手动分发包保留，不纳入 Git。
