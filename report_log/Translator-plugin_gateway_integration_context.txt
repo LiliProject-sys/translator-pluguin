@@ -1,0 +1,731 @@
+﻿Translator-plugin Gateway 接入上下文说明
+生成日期：2026-07-23
+项目根目录：D:\Project_Experimental\Translator_Plugin
+说明：本文档基于当前 Chrome 插件源码整理，用于后续设计“插件 -> Gateway -> Gemini/DeepSeek -> 插件”的 Beta Gateway 接入。本文档不是聊天记录，不包含真实 API Key、用户词库数据或私人网页内容。
+
+1. 项目与版本确认
+
+项目名称：Translator-plugin。
+当前 Chrome 扩展 manifest 位于 manifest.json。
+manifest_version：3。
+当前插件版本：1.0.1。
+当前主要入口：background.js 作为 MV3 service worker，content.js 作为普通网页 content script，popup.html/popup.js 作为工具栏 popup，options.html/options.js 作为 Provider 设置页，vocabulary.html/vocabulary.js 作为独立生词本页面。
+当前真实 Provider 文件：baidu-translation-provider.js、gemini-context-provider.js、deepseek-context-provider.js、translation-provider.js。
+当前 Skill 文件：ai-context-skill.js、sentence-translation-skill.js。
+当前本地数据存储：chrome.storage.local 与 chrome.storage.session。
+本次报告未修改运行时代码、manifest、README、测试、版本号，也未执行 Git add/commit/push。
+
+关键代码位置：
+manifest.json：声明 MV3、service worker、content script、popup、options page、host_permissions。
+background.js:1-8：通过 importScripts 加载 md5、Word Skill、Sentence Skill、Baidu/DeepSeek/Gemini Provider 与统一 language service。
+background.js:94-221：集中处理 runtime message。
+content.js:23-40：接收 GET_SELECTION_CONTEXT 与 SHOW_VOCABULARY_NOTICE。
+content.js:235-286：发送 TRANSLATE_TEXT 请求并处理 quick 结果。
+content.js:553-643：发送 detail Word Analysis 请求。
+translation-provider.js:16-62：统一 languageService 接口。
+
+2. 当前完整主链路
+
+用户划词后的运行链路如下：
+
+用户在普通网页选择英文文本。
+content.js 在 document mouseup 后延迟 80ms 读取 window.getSelection()，生成 currentSelectionSnapshot。
+content.js 通过 getSelectionContext() 获取 word、contextSentence、pageTitle、pageUrl。
+content.js 通过 detectSelectionRequestType() 判断 requestType：短词/短语进入 wordAnalysis，完整句子或长段落进入 sentenceTranslation。
+content.js 立即创建浮窗，并并行发送两个后台请求：CHECK_VOCABULARY_STATUS 用于生词保存状态，TRANSLATE_TEXT 用于快速翻译、Word Analysis 或 Sentence Translation。
+background.js 接收 TRANSLATE_TEXT 后调用 handleLanguageRequest()。
+handleLanguageRequest() 调用 self.languageService.process()，该服务由 translation-provider.js 创建。
+translation-provider.js 根据 translationSettings.provider 选择 baidu、mock、gemini 或 deepseek。
+Baidu/Mock 返回 resultType=quickTranslation。
+Gemini/DeepSeek 在 requestType=wordAnalysis 时调用 ai-context-skill.js，返回 resultType=contextAnalysis。
+Gemini/DeepSeek 在 requestType=sentenceTranslation 时调用 sentence-translation-skill.js，返回 resultType=sentenceTranslation。
+content.js 按 resultType 渲染浮窗；AI 或翻译结果不阻塞保存按钮。
+用户点击“加入生词本”后，content.js 发送 SAVE_VOCABULARY_ENTRY。
+background.js 的 saveVocabularyEntry() 统一去重、渐进补全并写入 chrome.storage.local 的 vocabularyEntries。
+保存后 content.js 可触发 GENERATE_VOCABULARY_CONTEXT_TRANSLATION，background.js 异步补写 contextTranslation。
+popup.js 只显示数量、设置入口和“打开生词本”。vocabulary.js 读取 vocabularyEntries，展示、搜索、排序、删除、打开来源。
+
+3. 所有相关 Message Type
+
+GET_SELECTION_CONTEXT
+方向：background.js -> content.js。
+用途：右键菜单保存时，从网页读取当前选区和上下文。
+请求示例：
+{
+  "type": "GET_SELECTION_CONTEXT"
+}
+响应示例：
+{
+  "word": "employed",
+  "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+  "pageTitle": "Example Research Page",
+  "pageUrl": "https://example.org/paper"
+}
+代码位置：content.js:23-35，content.js:42-66，background.js:56-92。
+
+SHOW_VOCABULARY_NOTICE
+方向：background.js -> content.js。
+用途：右键保存后在页面显示 toast。
+请求示例：
+{
+  "type": "SHOW_VOCABULARY_NOTICE",
+  "message": "已加入生词本"
+}
+代码位置：content.js:35-39，background.js:81-88。
+
+CHECK_VOCABULARY_STATUS
+方向：content.js -> background.js。
+用途：浮窗显示前查询 wordExists 与 exactEntryExists。
+请求示例：
+{
+  "type": "CHECK_VOCABULARY_STATUS",
+  "entry": {
+    "word": "employed",
+    "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+    "pageUrl": "https://example.org/paper"
+  }
+}
+响应示例：
+{
+  "status": "ok",
+  "wordExists": true,
+  "exactEntryExists": false
+}
+代码位置：background.js:99-127，background.js:499-525，content.js:206-233。
+
+TRANSLATE_TEXT
+方向：content.js/options.js -> background.js。
+用途：当前统一语言处理入口。它同时承载 quickTranslation、Word Analysis、Sentence Translation。
+Word quick 请求示例：
+{
+  "type": "TRANSLATE_TEXT",
+  "payload": {
+    "text": "employed",
+    "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+    "pageTitle": "Example Research Page",
+    "sourceLanguage": "en",
+    "targetLanguage": "zh-CN",
+    "requestType": "wordAnalysis",
+    "analysisMode": "quick",
+    "requestId": "selection-example-001"
+  }
+}
+Word detail 请求示例：
+{
+  "type": "TRANSLATE_TEXT",
+  "payload": {
+    "text": "employed",
+    "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+    "pageTitle": "Example Research Page",
+    "sourceLanguage": "en",
+    "targetLanguage": "zh-CN",
+    "requestType": "wordAnalysis",
+    "analysisMode": "detail",
+    "requestId": "selection-example-001-detail",
+    "userQuestion": "请用最简洁的信息说明该词在当前句子里的含义；只有近义词语义区别明显时才补充比较。"
+  }
+}
+Sentence 请求示例：
+{
+  "type": "TRANSLATE_TEXT",
+  "payload": {
+    "text": "These technologies are increasingly employed for the production of three-dimensional objects.",
+    "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+    "pageTitle": "Example Research Page",
+    "sourceLanguage": "en",
+    "targetLanguage": "zh-CN",
+    "requestType": "sentenceTranslation",
+    "analysisMode": "quick",
+    "requestId": "selection-example-001"
+  }
+}
+代码位置：background.js:130-142，background.js:223-284，content.js:235-286，content.js:553-643。
+
+CANCEL_LANGUAGE_REQUEST
+方向：content.js -> background.js。
+用途：关闭或替换浮窗时取消当前 quick/detail 请求。
+请求示例：
+{
+  "type": "CANCEL_LANGUAGE_REQUEST",
+  "payload": {
+    "requestIds": ["selection-example-001", "selection-example-001-detail"]
+  }
+}
+响应示例：
+{
+  "status": "ok",
+  "cancelledCount": 1
+}
+代码位置：background.js:144-152，content.js:961-978。
+
+GET_ACTIVE_LANGUAGE_MODE
+方向：content.js -> background.js。
+用途：浮窗根据当前 Provider/resultType 显示“正在翻译…”或“正在进行语境解析…”。
+响应示例：
+{
+  "status": "ok",
+  "provider": "gemini",
+  "resultType": "contextAnalysis"
+}
+代码位置：background.js:155-158，background.js:286-306，content.js:350-368。
+
+TEST_LANGUAGE_PROVIDER
+方向：options.js -> background.js。
+用途：设置页测试指定 Provider。
+请求示例：
+{
+  "type": "TEST_LANGUAGE_PROVIDER",
+  "provider": "gemini"
+}
+代码位置：background.js:160-164，background.js:308-321，options.js:163-185。
+
+TEST_TRANSLATION_CONNECTION
+方向：options.js -> background.js。
+用途：旧兼容测试入口，使用当前 active provider。
+代码位置：background.js:166-168。
+
+OPEN_OPTIONS_PAGE
+方向：content.js/popup.js -> background.js。
+用途：打开扩展设置页。
+代码位置：background.js:171-181，content.js:697-708。
+
+SAVE_VOCABULARY_ENTRY
+方向：content.js/background context menu -> background.js。
+用途：统一保存词条，执行去重与渐进补全。
+响应示例：
+{
+  "status": "saved",
+  "message": "已加入",
+  "entryId": "entry-example-001",
+  "hasContextTranslation": false
+}
+重复响应示例：
+{
+  "status": "duplicate",
+  "message": "已保存",
+  "entryId": "entry-example-001",
+  "hasContextTranslation": true
+}
+代码位置：background.js:199-220，background.js:358-419，content.js:842-878。
+
+DELETE_VOCABULARY_ENTRY
+方向：vocabulary.js -> background.js。
+用途：统一删除词条，并同步清理 session 随机顺序。
+请求示例：
+{
+  "type": "DELETE_VOCABULARY_ENTRY",
+  "entryId": "entry-example-001"
+}
+代码位置：background.js:184-186，background.js:527-551，vocabulary.js:359-374。
+
+OPEN_VOCABULARY_SOURCE
+方向：vocabulary.js -> background.js。
+用途：统一打开来源，background 做 URL 协议白名单。
+请求示例：
+{
+  "type": "OPEN_VOCABULARY_SOURCE",
+  "pageUrl": "https://example.org/paper"
+}
+代码位置：background.js:189-191，background.js:578-594，background.js:794-802，vocabulary.js:376-390。
+
+GENERATE_VOCABULARY_CONTEXT_TRANSLATION
+方向：content.js -> background.js。
+用途：保存后异步补写 contextSentence 的中文译文 contextTranslation。
+请求示例：
+{
+  "type": "GENERATE_VOCABULARY_CONTEXT_TRANSLATION",
+  "entry": {
+    "entryId": "entry-example-001",
+    "word": "employed",
+    "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+    "pageUrl": "https://example.org/paper"
+  }
+}
+代码位置：background.js:194-196，background.js:596-760，content.js:880-908。
+
+4. Quick Translation 的真实接口合同
+
+Quick Translation 是 Baidu 和 Mock Provider 的结果类型，resultType 固定为 quickTranslation。
+它可以处理单词、短语、句子或段落，但语义上仍属于“快速翻译 Provider”，不能伪装成 AI Sentence Translation。
+
+请求入口仍为 TRANSLATE_TEXT。
+请求 payload 核心字段：
+{
+  "text": "employed",
+  "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+  "pageTitle": "Example Research Page",
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-CN",
+  "requestType": "wordAnalysis",
+  "analysisMode": "quick",
+  "requestId": "selection-example-001"
+}
+
+Baidu 成功返回规范化后结构：
+{
+  "status": "ok",
+  "provider": "baidu",
+  "resultType": "quickTranslation",
+  "translatedText": "采用"
+}
+
+Mock 成功返回规范化后结构：
+{
+  "status": "ok",
+  "provider": "mock",
+  "resultType": "quickTranslation",
+  "translatedText": "模拟译文：employed"
+}
+
+代码位置：translation-provider.js:115-198 负责选择 Provider，translation-provider.js:214-263 负责规范化 Provider 结果。baidu-translation-provider.js:47-87 和 baidu-translation-provider.js:194-254 负责百度请求。translation-provider.js:64-113 负责 Mock。
+
+Baidu 当前配置来自 chrome.storage.local 的 translationSettings：baiduAppId、baiduAppKey。Baidu 请求参数为 q/from/to/appid/salt/sign，sign 使用 md5(appId + text + salt + appKey)。
+
+5. Word Analysis 的真实接口合同
+
+Word Analysis 仅由 Gemini 和 DeepSeek 这类 AI Provider 提供。它使用 ai-context-skill.js，当前 skillVersion 为 context-analysis-v6。
+Word Analysis 分为 quick 和 detail 两层。quick 在浮窗出现后自动请求；detail 只有用户点击“详细解释”按钮才请求。
+
+Word quick 请求 payload：
+{
+  "text": "employed",
+  "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+  "pageTitle": "Example Research Page",
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-CN",
+  "requestType": "wordAnalysis",
+  "analysisMode": "quick",
+  "requestId": "selection-example-001"
+}
+
+Word quick 成功响应：
+{
+  "status": "ok",
+  "provider": "gemini",
+  "resultType": "contextAnalysis",
+  "skillVersion": "context-analysis-v6",
+  "analysisMode": "quick",
+  "analysis": {
+    "word": "employed",
+    "lemma": "employ",
+    "phonetic": "/ɪmˈplɔɪ/",
+    "partOfSpeech": "v.",
+    "meaning": "使用；采用"
+  }
+}
+
+DeepSeek 的成功结构与 Gemini 相同，只是 provider 为 deepseek。
+content.js 在合法 quick 响应仍属于当前选区时，会把 lemma、phonetic、partOfSpeech、meaning 写入 currentSelectionSnapshot，用于后续保存新词条。写入前检查 selectionId、quickRequestId、selectionPanel、currentSelectionSnapshot 对象与 requestType，避免旧响应污染新保存。
+代码位置：content.js:235-286，content.js:288-307，content.js:460-502。
+
+6. Detailed Explanation 的真实接口合同
+
+Detailed Explanation 是 Word Analysis 的 detail 模式，只有 Gemini/DeepSeek 支持。它不属于 Sentence Translation，不保存到 vocabularyEntries。
+
+Word detail 请求 payload：
+{
+  "text": "employed",
+  "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+  "pageTitle": "Example Research Page",
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-CN",
+  "requestType": "wordAnalysis",
+  "analysisMode": "detail",
+  "requestId": "selection-example-001-detail",
+  "userQuestion": "请用最简洁的信息说明该词在当前句子里的含义；只有近义词语义区别明显时才补充比较。"
+}
+
+Word detail 成功响应：
+{
+  "status": "ok",
+  "provider": "deepseek",
+  "resultType": "contextAnalysis",
+  "skillVersion": "context-analysis-v6",
+  "analysisMode": "detail",
+  "analysis": {
+    "meaningInSentence": "被采用；被使用。",
+    "comparison": {
+      "word": "apply",
+      "difference": "employ 强调把技术或工具作为手段使用；apply 强调把方法作用于具体对象。"
+    }
+  }
+}
+
+comparison 也可以为 null：
+{
+  "meaningInSentence": "被采用；被使用。",
+  "comparison": null
+}
+
+content.js 渲染 detail 时只读取 meaningInSentence 和 comparison。comparison 非空时显示“当前词 vs comparison.word”以及 difference；comparison 为 null 时不显示比较区。
+代码位置：content.js:504-550，content.js:553-643。
+
+7. Provider 统一接口
+
+当前统一入口是 self.languageService.process(request, options)，定义在 translation-provider.js。
+
+统一 request 字段：
+{
+  "text": "employed",
+  "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+  "pageTitle": "Example Research Page",
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-CN",
+  "requestType": "wordAnalysis",
+  "analysisMode": "quick",
+  "requestId": "selection-example-001",
+  "userQuestion": "可选"
+}
+
+Provider registry 位于 translation-provider.js:115-198：
+baidu：返回 quickTranslation，调用 baiduProvider.translate。
+deepseek：返回 contextAnalysis 或 sentenceTranslation，调用 deepSeekProvider.analyze。
+gemini：返回 contextAnalysis 或 sentenceTranslation，调用 geminiProvider.analyze。
+mock：返回 quickTranslation，调用 mock.translate。
+
+统一结果由 translation-provider.js:214-263 规范化：
+contextAnalysis 必须经过 ai-context-skill.validateAnalysis(result.analysis, analysisMode)。
+sentenceTranslation 必须经过 sentenceTranslationSkill.validateTranslation(result)。
+quickTranslation 必须包含非空 translatedText。
+
+未来 GatewayProvider 最自然的接入点是 translation-provider.js 的 providerRegistry，而不是 content.js。GatewayProvider 只要实现类似 process/analyze 的内部调用，并返回现有 resultType 结构，前端无需知道网关细节。
+
+8. Validator 和 Schema
+
+Word Analysis Validator 位于 ai-context-skill.js。
+当前版本：context-analysis-v6。
+
+Quick Schema：
+{
+  "word": "非空字符串",
+  "lemma": "非空字符串",
+  "phonetic": "非空字符串",
+  "partOfSpeech": "adj. | v. | n. | adv. | prep. | phr.",
+  "meaning": "非空字符串"
+}
+additionalProperties 必须为 false。
+
+Detail Schema：
+{
+  "meaningInSentence": "非空字符串",
+  "comparison": null 或 {
+    "word": "非空字符串",
+    "difference": "非空字符串"
+  }
+}
+additionalProperties 必须为 false。
+
+Sentence Translation Validator 位于 sentence-translation-skill.js。
+当前版本：sentence-translation-v1。
+
+Sentence Schema：
+{
+  "translation": "非空中文译文字符串",
+  "keyTerm": null 或 {
+    "term": "专业术语",
+    "meaning": "简短中文解释"
+  }
+}
+additionalProperties 必须为 false。
+
+Validator 错误会被 Provider 或 languageService 包装成面向 content/options 的简洁中文错误。Gateway 返回若绕过这些字段，会被本地校验拒绝。
+
+9. 错误合同
+
+background.js 对 TRANSLATE_TEXT 的成功响应格式：
+{
+  "status": "ok",
+  "provider": "gemini",
+  "resultType": "contextAnalysis",
+  "skillVersion": "context-analysis-v6",
+  "analysisMode": "quick",
+  "analysis": {}
+}
+
+失败响应格式：
+{
+  "status": "error",
+  "message": "请先在设置页配置 API Key",
+  "errorCode": "CONFIG_REQUIRED",
+  "requiresConfiguration": true
+}
+
+取消响应格式：
+{
+  "status": "cancelled",
+  "message": "请求已取消",
+  "errorCode": "REQUEST_CANCELLED"
+}
+
+background.js:323-350 负责 normalizeTranslationError。Provider 可以提供 publicMessage、errorCode、errorType、requiresConfiguration 和 diagnostics。Service Worker console 只应记录脱敏后的 diagnostics，不应记录 API Key、完整用户选中文本、完整上下文或完整模型响应。
+
+Gemini 错误特点：
+使用 interactions endpoint。响应 status 必须 completed，非 completed 状态如 failed、incomplete、cancelled、budget_exceeded、requires_action、in_progress 都转换为明确错误，不继续解析四字段 JSON。Google error.status 与 error.message 可进入脱敏 diagnostics，message 应截断。
+代码位置：gemini-context-provider.js:321-369，gemini-context-provider.js:423-454。
+
+DeepSeek 错误特点：
+finish_reason 只接受 stop。length、content_filter、insufficient_system_resource、tool_calls 和未知 finish_reason 都转换为明确错误，不继续解析 JSON。空 content 可重试一次。
+代码位置：deepseek-context-provider.js:292-313。
+
+Baidu 错误特点：
+Baidu error_code 映射在 baidu-translation-provider.js:6-21，配置缺失、认证失败、限流、结果为空等都有明确错误。
+
+10. Storage 与设置合同
+
+chrome.storage.local：
+translationSettings：Provider 设置与本地 API Key。
+vocabularyEntries：所有生词条目。
+vocabularySortMode：独立生词本排序模式。
+
+chrome.storage.session：
+vocabularyRandomOrder：当前 Chrome 会话内的随机排序 id 顺序。
+
+translationSettings 当前结构：
+{
+  "provider": "baidu | deepseek | gemini | mock",
+  "baiduAppId": "示例占位或用户本地配置",
+  "baiduAppKey": "示例占位或用户本地配置",
+  "deepseekApiKey": "示例占位或用户本地配置",
+  "deepseekModel": "deepseek-v4-flash",
+  "geminiApiKey": "示例占位或用户本地配置",
+  "geminiModel": "gemini-3.5-flash"
+}
+
+vocabularyEntries 当前基础与可选结构：
+{
+  "id": "entry-example-001",
+  "word": "employed",
+  "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+  "pageTitle": "Example Research Page",
+  "pageUrl": "https://example.org/paper",
+  "createdAt": "2026-07-23T12:00:00.000Z",
+  "lemma": "employ",
+  "phonetic": "/ɪmˈplɔɪ/",
+  "partOfSpeech": "v.",
+  "meaning": "使用；采用",
+  "contextTranslation": "这些技术越来越多地被用于三维物体的生产。"
+}
+
+id、word、contextSentence、pageTitle、pageUrl、createdAt 是核心字段。lemma、phonetic、partOfSpeech、meaning、contextTranslation 是可选补充字段。meaningInSentence、comparison、sentenceTranslation、keyTerm 不写入 vocabularyEntries。
+
+重复判断只看 word + contextSentence + pageUrl。wordExists 使用 normalizeWordForMatch，即 trim、合并连续空白、小写。exactEntryExists 保持严格字段完全相同。
+代码位置：background.js:11-15，background.js:434-483，background.js:499-525。
+
+11. 设置页真实结构
+
+设置页文件：options.html、options.css、options.js。
+当前 Provider 下拉框包含：百度快速翻译、DeepSeek AI 语境解析、Gemini AI 语境解析、Mock。
+
+Baidu 配置字段：baiduAppId、baiduAppKey。
+DeepSeek 配置字段：deepseekApiKey、deepseekModel。
+Gemini 配置字段：geminiApiKey、geminiModel。
+Mock 无需 API Key。
+
+设置页行为：
+保存 Provider 只写 translationSettings.provider，不清除其他 Provider 凭据。
+API Key 密码输入框为空时不覆盖已有 key。
+清除操作只删除对应 Provider 的凭据。
+测试操作通过 TEST_LANGUAGE_PROVIDER 发送 provider id 到 background。
+设置页显示当前插件版本、当前模式状态和本地保存安全提示。
+
+没有发现 Beta Gateway Access Key 输入框、用户登录、账号系统、服务器地址配置或欢迎页强制流程。因此 Gateway 接入若需要 beta key，必须新增设置字段；示例字段可命名为 gatewayAccessKey，示例值只能使用 example-beta-access-key。
+代码位置：options.html:17-88，options.js:31-45，options.js:47-160，options.js:163-185。
+
+12. 生词功能与网关是否有关
+
+当前生词保存与 Gateway 无直接依赖，应继续保持本地优先。
+
+相关数据：vocabularyEntries 存在 chrome.storage.local。
+保存逻辑：background.js saveVocabularyEntry()。
+删除逻辑：background.js DELETE_VOCABULARY_ENTRY。
+打开来源：background.js OPEN_VOCABULARY_SOURCE。
+排序：vocabularySortMode 使用 chrome.storage.local，vocabularyRandomOrder 使用 chrome.storage.session。
+语境译文：contextTranslation 是保存后异步补写的可选字段，可复用 active Provider。
+
+Gateway 接入第一阶段不应改变 vocabularyEntries 的核心结构，不应上传整本生词本，不应引入账号同步，不应把 AI detail 结果写入 storage。
+如果未来 Gateway 用于生成 contextTranslation，建议只发送当前条目的 contextSentence/pageUrl/request metadata，不发送整本词库。
+
+13. GatewayProvider 最小接入点
+
+建议新增文件：gateway-language-provider.js。
+建议在 background.js importScripts 中加入该文件，并在 translation-provider.js 的 providerRegistry 中新增 gateway。
+建议扩展 translationSettings：
+{
+  "provider": "gateway",
+  "gatewayEndpoint": "https://gateway.example.com/v1/language",
+  "gatewayAccessKey": "example-beta-access-key"
+}
+
+最小接入方式：
+GatewayProvider 接收 translation-provider.js 中统一后的 request。
+GatewayProvider 根据 requestType 和 analysisMode 转发到服务端。
+服务端调用 Gemini/DeepSeek 或其他模型。
+服务端返回现有 resultType 合同。
+GatewayProvider 将结果交回 translation-provider.js，由本地 Validator 再校验一次。
+content.js、vocabulary.js、popup.js 不应直接知道 Gateway 的存在。
+
+推荐新增 Provider registry 形态：
+{
+  "id": "gateway",
+  "label": "Gateway Beta",
+  "resultType": "contextAnalysis",
+  "execute": function(request) {
+    return gatewayProvider.process(request);
+  }
+}
+
+注意：Gateway 可能同时返回 contextAnalysis、sentenceTranslation 或 quickTranslation，所以 resultType 不应只靠 provider id 猜测，应以 response.resultType 为准。
+
+14. 建议的网关通信合同
+
+插件发给 Gateway 的请求建议：
+{
+  "requestId": "selection-example-001",
+  "betaAccessKey": "example-beta-access-key",
+  "providerPreference": "gemini",
+  "requestType": "wordAnalysis",
+  "analysisMode": "quick",
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-CN",
+  "targetText": "employed",
+  "contextSentence": "These technologies are increasingly employed for the production of three-dimensional objects.",
+  "pageTitle": "Example Research Page",
+  "client": {
+    "extensionName": "Translator-plugin",
+    "extensionVersion": "1.0.1",
+    "manifestVersion": 3
+  }
+}
+
+Gateway 返回 Word quick：
+{
+  "requestId": "selection-example-001",
+  "status": "ok",
+  "provider": "gemini",
+  "resultType": "contextAnalysis",
+  "skillVersion": "context-analysis-v6",
+  "analysisMode": "quick",
+  "analysis": {
+    "word": "employed",
+    "lemma": "employ",
+    "phonetic": "/ɪmˈplɔɪ/",
+    "partOfSpeech": "v.",
+    "meaning": "使用；采用"
+  }
+}
+
+Gateway 返回 Word detail：
+{
+  "requestId": "selection-example-001-detail",
+  "status": "ok",
+  "provider": "deepseek",
+  "resultType": "contextAnalysis",
+  "skillVersion": "context-analysis-v6",
+  "analysisMode": "detail",
+  "analysis": {
+    "meaningInSentence": "被采用；被使用。",
+    "comparison": {
+      "word": "apply",
+      "difference": "employ 强调把技术或工具作为手段使用；apply 强调把方法作用于具体对象。"
+    }
+  }
+}
+
+Gateway 返回 Sentence Translation：
+{
+  "requestId": "selection-example-001",
+  "status": "ok",
+  "provider": "gemini",
+  "resultType": "sentenceTranslation",
+  "skillVersion": "sentence-translation-v1",
+  "translation": "这些技术越来越多地被用于三维物体的生产。",
+  "keyTerm": null
+}
+
+Gateway 返回 Quick Translation：
+{
+  "requestId": "selection-example-001",
+  "status": "ok",
+  "provider": "baidu",
+  "resultType": "quickTranslation",
+  "translatedText": "这些技术越来越多地被用于三维物体的生产。"
+}
+
+Gateway 错误响应建议：
+{
+  "requestId": "selection-example-001",
+  "status": "error",
+  "message": "网关服务暂时不可用",
+  "errorCode": "GATEWAY_SERVICE_ERROR",
+  "requiresConfiguration": false
+}
+
+建议 HTTP 状态：
+400：请求字段非法。
+401/403：betaAccessKey 无效或权限不足。
+408/504：网关或上游超时。
+429：限流。
+502/503：上游 Provider 服务失败。
+500：网关内部错误。
+
+Gateway 不应把上游完整错误、prompt、API Key、原始模型响应直接返回给插件 UI。可以返回 requestId、errorCode、简洁中文 message 和必要的脱敏 diagnostics。
+
+15. 数据最小化与隐私
+
+当前插件会把用户选中文本、上下文句子、页面标题发送给 Provider。Baidu/Gemini/DeepSeek 直接由扩展发起网络请求。Gateway 接入后，应明确这些字段会发送到 Gateway。
+
+建议 Gateway 第一阶段只接收：targetText、contextSentence、pageTitle、sourceLanguage、targetLanguage、requestType、analysisMode、requestId、extensionVersion、providerPreference。默认不发送 pageUrl；如服务端确实需要调试来源，应将 pageUrl 设计为可选，并默认关闭或只发送 hostname。
+
+不建议发送：整页正文、用户生词本全量 vocabularyEntries、chrome.storage.local 全量内容、浏览器 Cookie、真实用户身份、任何本地文件路径、API Key。
+
+betaAccessKey 应只作为访问 Gateway 的临时测试凭据。插件示例值只能使用 example-beta-access-key。真实 key 不应写入源码、README、测试、report 或 Git 历史。
+
+日志原则：
+Service Worker 可记录 provider、errorCode、HTTP status、截断后的错误 message、requestId。
+不记录 API Key、完整 selected text、完整 contextSentence、完整 prompt、完整模型响应、用户私人网页内容。
+
+16. 建议的第一阶段改动清单
+
+第一阶段 Gateway 接入建议只做以下最小变更：
+
+新增 gateway-language-provider.js，实现与 languageService 兼容的 process(request) 或 analyze(request) 包装。
+在 translation-provider.js 中注册 provider id gateway。
+在 options.html/options.js 增加 Gateway Beta 配置区域：gatewayEndpoint、gatewayAccessKey、providerPreference 或服务端模型选择。
+在 manifest.json 增加 Gateway endpoint 对应 host_permissions；如果 endpoint 固定，则只加固定域名，不加全网权限。
+在 README 增加 Gateway Beta 配置与隐私说明。
+新增 tests/gateway-provider.test.js，覆盖请求字段、响应字段、错误映射、无 key 配置、脱敏日志、Validator 二次校验。
+保持 content.js 的 TRANSLATE_TEXT、requestType、analysisMode、selectionId 生命周期不变。
+保持 vocabularyEntries、translationSettings 兼容；只增量添加 gateway 配置字段。
+
+第一阶段不要做：登录系统、云同步、用户数据库、生词本上传、Prompt 可视化编辑、复杂计费、团队管理、写作辅助。
+
+17. 仍无法确认的信息
+
+尚未确认 Gateway 的真实域名、路由路径、部署环境和 TLS 证书策略。
+尚未确认 Gateway 的认证方式最终是 betaAccessKey、JWT、OAuth 还是其它方式。
+尚未确认 Gateway 是否允许用户选择 Gemini/DeepSeek，还是由服务端统一调度。
+尚未确认 Gateway 是否需要保存请求日志；如果需要，必须单独设计脱敏、保留周期和删除策略。
+尚未确认服务端是否会缓存 AI 结果，以及缓存 key 是否包含 skillVersion、requestType、analysisMode、targetLanguage。
+尚未确认 Gateway 对 Baidu quickTranslation 是否也做中转；当前建议第一阶段优先中转 AI Provider。
+尚未确认是否需要把 pageUrl 发给 Gateway；隐私角度建议默认不发或只发 hostname。
+尚未确认是否提供 Beta 用户管理页面、Key 轮换页面和调用额度提示。
+尚未确认真实 Chrome GUI 中 Gateway Provider 的网络失败、超时、限流等提示文案；当前只能基于本地错误合同设计。
+
+附录：当前选择分类规则
+
+content.js detectSelectionRequestType() 当前规则：
+包含 . ? ! ; 时进入 sentenceTranslation。
+单词数大于 10 时进入 sentenceTranslation。
+文本长度大于 80 时进入 sentenceTranslation。
+其他进入 wordAnalysis。
+代码位置：content.js:685-695。
+
+附录：当前句子边界规则
+
+content.js extractSentence() 使用 isSentenceBoundary() 判断 . ? ! ;。小数点如 4.0、95.5 不视为句末。有限学术缩写如 Fig.、Eq.、Ref.、Sec.、No.、vs.、e.g.、i.e.、et al. 会被保护。该逻辑仍是启发式，不是完整 NLP 分句。
+代码位置：content.js:1280-1437。
+
+附录：当前打开来源协议白名单
+
+background.js normalizeSourceUrl() 与 vocabulary.js isAllowedSourceUrl() 当前允许 http:、https:、file:、chrome-extension:。明确拒绝 javascript:、data: 和无效 URL。
+代码位置：background.js:794-802，vocabulary.js:513-520。
