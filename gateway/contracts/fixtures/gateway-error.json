@@ -1,0 +1,7 @@
+{
+  "status": "error",
+  "requestId": "selection-example-001",
+  "errorCode": "INVALID_REQUEST",
+  "message": "请求字段不合法",
+  "requiresConfiguration": false
+}

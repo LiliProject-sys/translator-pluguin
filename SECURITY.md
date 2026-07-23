@@ -1,5 +1,9 @@
 # Security Policy
 
+Gateway Beta local `.env` files must remain untracked. Only `gateway/.env.example` may be committed. Gateway logs must not record full user text, full prompts, complete model responses, full Beta Tokens, Gemini API keys, cookies, or real user data.
+
+Gateway Token verification uses the Bearer header and constant-time comparison. This phase includes only basic input limits, request body limits, timeouts, and redacted error mapping; it does not add accounts, payment, databases, Redis, or complex rate limiting.
+
 ## Supported Version
 
 The current private beta distribution targets the latest local workspace version shown in `manifest.json`.

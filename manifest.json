@@ -15,7 +15,8 @@
   "host_permissions": [
     "https://fanyi-api.baidu.com/*",
     "https://api.deepseek.com/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "http://127.0.0.1:8000/*"
   ],
   "options_ui": {
     "page": "options.html",

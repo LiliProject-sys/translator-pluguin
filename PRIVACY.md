@@ -2,6 +2,10 @@
 
 Translator-plugin is a local Chrome Extension demo for vocabulary collection, quick translation, and AI-assisted reading.
 
+Gateway Beta local mode sends selected text, the context sentence, and an optional page title to the local Gateway at `http://127.0.0.1:8000`. The Gateway then uses a server-side Gemini API key. The extension does not send page URLs, whole-page text, cookies, browser history, local file paths, full vocabulary data, prompts, model names, provider preferences, or local BYOK API keys to the Gateway.
+
+The shared Beta Token is sent only as an `Authorization: Bearer <Token>` header, not in the language JSON body. Real tokens and Gemini API keys must not be committed to Git, reports, README files, manifests, or tests.
+
 ## Data The Extension Reads
 
 When you select text on a webpage, the content script may read:

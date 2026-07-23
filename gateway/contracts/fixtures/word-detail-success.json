@@ -1,0 +1,18 @@
+{
+  "status": "ok",
+  "requestId": "selection-example-001-detail",
+  "data": {
+    "provider": "gateway",
+    "upstreamProvider": "gemini",
+    "resultType": "contextAnalysis",
+    "skillVersion": "context-analysis-v6",
+    "analysisMode": "detail",
+    "analysis": {
+      "meaningInSentence": "被采用；被使用。",
+      "comparison": {
+        "word": "apply",
+        "difference": "employ 强调把技术或工具作为手段使用；apply 强调把方法作用于具体对象。"
+      }
+    }
+  }
+}

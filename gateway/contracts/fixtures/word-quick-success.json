@@ -1,0 +1,18 @@
+{
+  "status": "ok",
+  "requestId": "selection-example-001",
+  "data": {
+    "provider": "gateway",
+    "upstreamProvider": "gemini",
+    "resultType": "contextAnalysis",
+    "skillVersion": "context-analysis-v6",
+    "analysisMode": "quick",
+    "analysis": {
+      "word": "employed",
+      "lemma": "employ",
+      "phonetic": "/ɪmˈplɔɪ/",
+      "partOfSpeech": "v.",
+      "meaning": "使用；采用"
+    }
+  }
+}

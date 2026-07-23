@@ -25,6 +25,17 @@ build/
 !.env.example
 *.env
 *.local
+gateway/.env
+gateway/.venv/
+.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+**/.pytest_cache/
+*.pyc
+*.pyo
+.coverage
+htmlcov/
 secrets/
 credentials/
 private/

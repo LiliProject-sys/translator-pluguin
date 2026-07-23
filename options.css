@@ -63,6 +63,29 @@ h2 {
   margin-top: 16px;
 }
 
+.gateway-welcome {
+  margin-bottom: 16px;
+}
+
+.advanced-settings {
+  margin-top: 16px;
+}
+
+.advanced-settings > summary {
+  min-height: 42px;
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #1f2937;
+  background: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.advanced-settings[open] > summary {
+  margin-bottom: 16px;
+}
+
 .provider-description {
   margin: 0 0 16px;
   color: #64748b;

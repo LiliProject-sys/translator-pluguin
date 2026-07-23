@@ -5,6 +5,8 @@ const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
 const providerSelect = document.getElementById("providerSelect");
 const versionText = document.getElementById("versionText");
 const modeStatus = document.getElementById("modeStatus");
+const gatewayAccessTokenInput = document.getElementById("gatewayAccessTokenInput");
+const gatewayTokenHint = document.getElementById("gatewayTokenHint");
 const appIdInput = document.getElementById("appIdInput");
 const appKeyInput = document.getElementById("appKeyInput");
 const appKeyHint = document.getElementById("appKeyHint");
@@ -17,6 +19,7 @@ const geminiKeyHint = document.getElementById("geminiKeyHint");
 
 document.addEventListener("DOMContentLoaded", loadSettings);
 providerSelect.addEventListener("change", saveProviderSelection);
+document.getElementById("gatewayStartButton").addEventListener("click", verifyGatewayAccessToken);
 document.getElementById("baiduSaveButton").addEventListener("click", saveBaiduSettings);
 document.getElementById("baiduTestButton").addEventListener("click", () => testProvider("baidu"));
 document.getElementById("baiduClearButton").addEventListener("click", clearBaiduSettings);
@@ -32,6 +35,7 @@ function loadSettings() {
   versionText.textContent = `v${chrome.runtime.getManifest().version}`;
   readSettings((settings) => {
     providerSelect.value = normalizeProvider(settings.provider);
+    gatewayAccessTokenInput.value = "";
     appIdInput.value = normalizeText(settings.baiduAppId);
     appKeyInput.value = "";
     deepseekApiKeyInput.value = "";
@@ -41,6 +45,46 @@ function loadSettings() {
     updateKeyHints(settings);
     updateProviderVisibility();
     renderModeStatus();
+  });
+}
+
+function verifyGatewayAccessToken() {
+  const candidateToken = normalizeText(gatewayAccessTokenInput.value);
+  if (!candidateToken) {
+    showStatus("gatewayStatus", "请填写测试访问码", true);
+    return;
+  }
+  showStatus("gatewayStatus", "正在验证测试访问码…", false);
+  chrome.runtime.sendMessage({
+    type: "TEST_LANGUAGE_PROVIDER",
+    provider: "gateway",
+    config: {
+      gatewayAccessToken: candidateToken
+    }
+  }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to verify Gateway token:", chrome.runtime.lastError.message);
+      showStatus("gatewayStatus", "验证失败，请查看扩展控制台", true);
+      return;
+    }
+    if (!response || response.status !== "ok") {
+      showStatus("gatewayStatus", response && response.message ? response.message : "测试访问码无效", true);
+      return;
+    }
+    readSettings((settings) => {
+      writeSettings({
+        ...settings,
+        gatewayAccessToken: candidateToken,
+        provider: "gateway"
+      }, () => {
+        gatewayAccessTokenInput.value = "";
+        providerSelect.value = "gateway";
+        updateKeyHints({ ...settings, gatewayAccessToken: candidateToken });
+        updateProviderVisibility();
+        renderModeStatus();
+        showStatus("gatewayStatus", "已连接，可以开始使用", false);
+      });
+    });
   });
 }
 
@@ -176,6 +220,7 @@ function testProvider(provider) {
     if (response.resultType === "contextAnalysis" && response.analysis) {
       const summary = response.analysis.academicMeaning
         || response.analysis.contextualMeaning
+        || response.analysis.meaning
         || "语境解析已返回";
       showStatus(statusId, `测试成功：${summary}`, false);
     } else {
@@ -191,6 +236,9 @@ function updateProviderVisibility() {
 }
 
 function updateKeyHints(settings) {
+  gatewayTokenHint.textContent = normalizeText(settings.gatewayAccessToken)
+    ? "已保存测试访问码。重新输入并验证成功后会替换。"
+    : "尚未保存测试访问码。";
   appKeyHint.textContent = normalizeText(settings.baiduAppKey)
     ? "已保存百度密钥。留空保存会保留现有密钥。"
     : "尚未保存百度密钥。";
@@ -204,6 +252,7 @@ function updateKeyHints(settings) {
 
 function renderModeStatus() {
   const labels = {
+    gateway: "Gateway Beta",
     baidu: "百度快速翻译",
     deepseek: "DeepSeek AI 语境解析",
     gemini: "Gemini AI 语境解析",
@@ -246,7 +295,7 @@ function showStatus(elementId, message, isError) {
 
 function normalizeProvider(value) {
   const provider = normalizeText(value).toLocaleLowerCase();
-  return ["baidu", "deepseek", "gemini", "mock"].includes(provider) ? provider : "baidu";
+  return ["gateway", "baidu", "deepseek", "gemini", "mock"].includes(provider) ? provider : "gateway";
 }
 
 function normalizeText(value) {

@@ -119,6 +119,7 @@
     const baiduProvider = providerOptions.baiduProvider;
     const deepSeekProvider = providerOptions.deepSeekProvider;
     const geminiProvider = providerOptions.geminiProvider;
+    const gatewayProvider = providerOptions.gatewayProvider || null;
 
     if (!baiduProvider || typeof baiduProvider.translate !== "function") {
       throw new Error("Configured provider requires a Baidu provider.");
@@ -129,8 +130,7 @@
     if (!deepSeekProvider || typeof deepSeekProvider.analyze !== "function") {
       throw new Error("Configured provider requires a DeepSeek provider.");
     }
-
-    const providerRegistry = Object.freeze({
+    const registryEntries = {
       baidu: Object.freeze({
         resultType: "quickTranslation",
         execute: async (request) => {
@@ -154,7 +154,17 @@
         execute: (request) => mockProvider.translate(request),
         cancel: (requestId) => cancelProviderRequest(mockProvider, requestId)
       })
-    });
+    };
+
+    if (gatewayProvider && typeof gatewayProvider.process === "function") {
+      registryEntries.gateway = Object.freeze({
+        resultType: "contextAnalysis",
+        execute: (request, processOptions) => gatewayProvider.process(request, processOptions || {}),
+        cancel: (requestId) => cancelProviderRequest(gatewayProvider, requestId)
+      });
+    }
+
+    const providerRegistry = Object.freeze(registryEntries);
 
     async function getActiveMode() {
       const settings = await readSettings(storageArea);
@@ -192,7 +202,7 @@
         const providerId = providerOverride
           ? normalizeProviderId(providerOverride, providerRegistry)
           : await getActiveMode();
-        return providerRegistry[providerId].execute(request);
+        return providerRegistry[providerId].execute(request, processOptions || {});
       }
     };
   }
@@ -223,11 +233,13 @@
       const analysisMode = normalizeAnalysisMode(result && result.analysisMode);
       return {
         provider,
+        requestId: normalizeText(result && result.requestId),
+        upstreamProvider: normalizeText(result && result.upstreamProvider),
         resultType,
         skillVersion: normalizeText(result && result.skillVersion) || skill.skillVersion,
         analysisMode,
         analysis: skill.validateAnalysis(result && result.analysis, analysisMode),
-        cached: !!(result && result.cached)
+        ...(result && result.cached ? { cached: true } : {})
       };
     }
 
@@ -242,11 +254,13 @@
       });
       return {
         provider,
+        requestId: normalizeText(result && result.requestId),
+        upstreamProvider: normalizeText(result && result.upstreamProvider),
         resultType,
         skillVersion: normalizeText(result && result.skillVersion) || skill.skillVersion,
         translation: translation.translation,
         keyTerm: translation.keyTerm,
-        cached: !!(result && result.cached)
+        ...(result && result.cached ? { cached: true } : {})
       };
     }
 
@@ -256,9 +270,11 @@
     }
     return {
       provider,
+      requestId: normalizeText(result && result.requestId),
+      upstreamProvider: normalizeText(result && result.upstreamProvider),
       resultType: "quickTranslation",
       translatedText,
-      cached: !!(result && result.cached)
+      ...(result && result.cached ? { cached: true } : {})
     };
   }
 
@@ -345,6 +361,7 @@
   const baiduFactory = globalScope.baiduTranslationProviderFactory;
   const deepSeekFactory = globalScope.deepSeekContextProviderFactory;
   const geminiFactory = globalScope.geminiContextProviderFactory;
+  const gatewayFactory = globalScope.gatewayLanguageProviderFactory;
   if (!baiduFactory || typeof baiduFactory.createBaiduTranslationProvider !== "function") {
     throw new Error("Baidu translation provider is unavailable.");
   }
@@ -354,20 +371,26 @@
   if (!deepSeekFactory || typeof deepSeekFactory.createDeepSeekContextProvider !== "function") {
     throw new Error("DeepSeek context provider is unavailable.");
   }
-
   const baiduProvider = baiduFactory.createBaiduTranslationProvider();
   const deepSeekProvider = deepSeekFactory.createDeepSeekContextProvider();
   const geminiProvider = geminiFactory.createGeminiContextProvider();
+  const gatewayProvider = gatewayFactory && typeof gatewayFactory.createGatewayLanguageProvider === "function"
+    ? gatewayFactory.createGatewayLanguageProvider()
+    : null;
   const configuredProvider = createConfiguredLanguageProvider({
     baiduProvider,
     deepSeekProvider,
-    geminiProvider
+    geminiProvider,
+    gatewayProvider
   });
   const languageService = createLanguageService(configuredProvider);
 
   globalScope.baiduTranslationProvider = baiduProvider;
   globalScope.deepSeekContextProvider = deepSeekProvider;
   globalScope.geminiContextProvider = geminiProvider;
+  if (gatewayProvider) {
+    globalScope.gatewayLanguageProvider = gatewayProvider;
+  }
   globalScope.languageService = languageService;
   globalScope.translationService = languageService;
 })(self);

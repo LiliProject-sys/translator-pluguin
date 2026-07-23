@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add local Gateway Beta scaffolding for FastAPI, fixed Gemini forwarding, plugin GatewayProvider, shared contract fixtures, and local-only onboarding.
+- Keep manifest version at `1.0.1`; the target `1.1.0` version is deferred until future Cloud Run deployment and remote Beta validation.
+
 ## 1.0.1 - Private Beta Candidate
 
 - Keeps the floating reading panel open after saving vocabulary.

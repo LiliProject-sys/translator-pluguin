@@ -1,0 +1,12 @@
+{
+  "status": "ok",
+  "requestId": "selection-sentence-001",
+  "data": {
+    "provider": "gateway",
+    "upstreamProvider": "gemini",
+    "resultType": "sentenceTranslation",
+    "skillVersion": "sentence-translation-v1",
+    "translation": "这些技术越来越多地被用于三维物体的生产。",
+    "keyTerm": null
+  }
+}

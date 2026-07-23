@@ -5,6 +5,7 @@ importScripts(
   "baidu-translation-provider.js",
   "deepseek-context-provider.js",
   "gemini-context-provider.js",
+  "gateway-language-provider.js",
   "translation-provider.js"
 );
 
@@ -14,7 +15,16 @@ const CONTEXT_MENU_ID = "add-to-vocabulary";
 const SUPPLEMENTAL_FIELDS = ["lemma", "phonetic", "partOfSpeech", "meaning", "contextTranslation"];
 const contextTranslationTasks = new Map();
 
-chrome.runtime.onInstalled.addListener(createContextMenu);
+chrome.runtime.onInstalled.addListener((details) => {
+  createContextMenu();
+  if (details && details.reason === "install") {
+    chrome.runtime.openOptionsPage(() => {
+      if (chrome.runtime.lastError) {
+        console.error("Failed to open options page after install:", chrome.runtime.lastError.message);
+      }
+    });
+  }
+});
 chrome.runtime.onStartup.addListener(createContextMenu);
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -32,6 +42,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (self.deepSeekContextProvider && typeof self.deepSeekContextProvider.reset === "function") {
     self.deepSeekContextProvider.reset();
+  }
+
+  if (self.gatewayLanguageProvider && typeof self.gatewayLanguageProvider.reset === "function") {
+    self.gatewayLanguageProvider.reset();
   }
 });
 
@@ -159,6 +173,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "TEST_LANGUAGE_PROVIDER") {
     const providerId = normalizeText(message.provider);
+    if (providerId === "gateway") {
+      handleGatewayProviderTest(message.config || {}, sendResponse);
+      return true;
+    }
     handleLanguageRequest(createProviderTestPayload(providerId), sendResponse, providerId);
     return true;
   }
@@ -305,8 +323,27 @@ function handleActiveLanguageModeRequest(sendResponse) {
   });
 }
 
+function handleGatewayProviderTest(config, sendResponse) {
+  const candidateToken = normalizeText(config && config.gatewayAccessToken);
+  if (!self.gatewayLanguageProvider || typeof self.gatewayLanguageProvider.verifyAccessToken !== "function") {
+    sendResponse({ status: "error", message: "Gateway 不可用", errorCode: "GATEWAY_UNAVAILABLE" });
+    return;
+  }
+  self.gatewayLanguageProvider.verifyAccessToken(candidateToken).then(() => {
+    sendResponse({ status: "ok", provider: "gateway", access: "granted" });
+  }).catch((error) => {
+    const safeError = normalizeTranslationError(error);
+    sendResponse({
+      status: "error",
+      message: safeError.message,
+      errorCode: safeError.errorCode,
+      requiresConfiguration: safeError.requiresConfiguration
+    });
+  });
+}
+
 function createProviderTestPayload(providerId) {
-  const isContextAnalysis = providerId === "gemini" || providerId === "deepseek";
+  const isContextAnalysis = providerId === "gemini" || providerId === "deepseek" || providerId === "gateway";
   return {
     text: isContextAnalysis ? "employed" : "apple",
     contextSentence: isContextAnalysis

@@ -1,0 +1,15 @@
+{
+  "status": "ok",
+  "requestId": "selection-example-null-detail",
+  "data": {
+    "provider": "gateway",
+    "upstreamProvider": "gemini",
+    "resultType": "contextAnalysis",
+    "skillVersion": "context-analysis-v6",
+    "analysisMode": "detail",
+    "analysis": {
+      "meaningInSentence": "增强；加固。",
+      "comparison": null
+    }
+  }
+}

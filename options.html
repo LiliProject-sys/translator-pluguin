@@ -10,75 +10,91 @@
     <main class="settings-shell">
       <header class="settings-header">
         <p class="product-name">Translator-plugin <span id="versionText"></span></p>
-        <h1>语言处理设置</h1>
-        <p class="settings-summary">选择快速翻译或 AI 语境解析 Provider。状态查询和生词保存不受该设置影响。</p>
+        <h1>欢迎使用 Translator</h1>
+        <p class="settings-summary">输入开发者提供的测试访问码，验证后即可开始划词使用。</p>
       </header>
 
-      <section class="settings-section" aria-labelledby="modeHeading">
-        <h2 id="modeHeading">当前模式</h2>
-        <label class="field-label" for="providerSelect">Provider</label>
-        <select id="providerSelect">
-          <option value="baidu">百度快速翻译</option>
-          <option value="deepseek">DeepSeek AI 语境解析</option>
-          <option value="gemini">Gemini AI 语境解析</option>
-          <option value="mock">Mock 测试</option>
-        </select>
-        <div id="modeStatus" class="configuration-status" aria-live="polite"></div>
-      </section>
-
-      <section id="baiduSection" class="settings-section provider-section" aria-labelledby="baiduHeading">
-        <h2 id="baiduHeading">百度快速翻译</h2>
-        <label class="field-label" for="appIdInput">百度 APPID</label>
-        <input id="appIdInput" type="text" autocomplete="off" spellcheck="false">
-        <label class="field-label" for="appKeyInput">百度密钥（App Key）</label>
-        <input id="appKeyInput" type="password" autocomplete="new-password" spellcheck="false">
-        <p id="appKeyHint" class="field-hint"></p>
+      <section class="settings-section gateway-welcome" aria-labelledby="gatewayHeading">
+        <h2 id="gatewayHeading">欢迎使用</h2>
+        <label class="field-label" for="gatewayAccessTokenInput">测试访问码</label>
+        <input id="gatewayAccessTokenInput" type="password" autocomplete="new-password" spellcheck="false">
+        <p id="gatewayTokenHint" class="field-hint"></p>
         <div class="settings-actions">
-          <button id="baiduSaveButton" class="primary-button" type="button">保存百度配置</button>
-          <button id="baiduTestButton" type="button">测试百度</button>
-          <button id="baiduClearButton" class="danger-button" type="button">清除百度配置</button>
+          <button id="gatewayStartButton" class="primary-button" type="button">验证并开始使用</button>
         </div>
-        <div id="baiduStatus" class="operation-status" aria-live="polite"></div>
+        <div id="gatewayStatus" class="operation-status" aria-live="polite"></div>
       </section>
 
-      <section id="deepseekSection" class="settings-section provider-section" aria-labelledby="deepseekHeading">
-        <h2 id="deepseekHeading">DeepSeek AI 语境解析</h2>
-        <label class="field-label" for="deepseekApiKeyInput">DeepSeek API Key</label>
-        <input id="deepseekApiKeyInput" type="password" autocomplete="new-password" spellcheck="false">
-        <p id="deepseekKeyHint" class="field-hint"></p>
-        <label class="field-label" for="deepseekModelInput">Model ID</label>
-        <input id="deepseekModelInput" type="text" autocomplete="off" spellcheck="false" placeholder="deepseek-v4-flash">
-        <p class="field-hint">默认使用 deepseek-v4-flash，也可填写当前账号可用的其它模型，不限制白名单。</p>
-        <div class="settings-actions">
-          <button id="deepseekSaveButton" class="primary-button" type="button">保存 DeepSeek 配置</button>
-          <button id="deepseekTestButton" type="button">测试 DeepSeek</button>
-          <button id="deepseekClearButton" class="danger-button" type="button">清除 DeepSeek 配置</button>
-        </div>
-        <div id="deepseekStatus" class="operation-status" aria-live="polite"></div>
-      </section>
+      <details id="advancedSettings" class="advanced-settings">
+        <summary>高级设置（自带 API Key）</summary>
 
-      <section id="geminiSection" class="settings-section provider-section" aria-labelledby="geminiHeading">
-        <h2 id="geminiHeading">Gemini AI 语境解析</h2>
-        <label class="field-label" for="geminiApiKeyInput">Gemini API Key</label>
-        <input id="geminiApiKeyInput" type="password" autocomplete="new-password" spellcheck="false">
-        <p id="geminiKeyHint" class="field-hint"></p>
-        <label class="field-label" for="geminiModelInput">Model ID</label>
-        <input id="geminiModelInput" type="text" autocomplete="off" spellcheck="false" placeholder="gemini-3.5-flash">
-        <p class="field-hint">默认使用 gemini-3.5-flash，也可填写账号可用的其它 Gemini 文本模型。</p>
-        <div class="settings-actions">
-          <button id="geminiSaveButton" class="primary-button" type="button">保存 Gemini 配置</button>
-          <button id="geminiTestButton" type="button">测试 Gemini</button>
-          <button id="geminiClearButton" class="danger-button" type="button">清除 Gemini 配置</button>
-        </div>
-        <div id="geminiStatus" class="operation-status" aria-live="polite"></div>
-      </section>
+        <section class="settings-section" aria-labelledby="modeHeading">
+          <h2 id="modeHeading">当前模式</h2>
+          <label class="field-label" for="providerSelect">Provider</label>
+          <select id="providerSelect">
+            <option value="gateway">Gateway Beta</option>
+            <option value="baidu">百度快速翻译</option>
+            <option value="deepseek">DeepSeek AI 语境解析</option>
+            <option value="gemini">Gemini AI 语境解析</option>
+            <option value="mock">Mock 测试</option>
+          </select>
+          <div id="modeStatus" class="configuration-status" aria-live="polite"></div>
+        </section>
 
-      <section id="mockSection" class="settings-section provider-section" aria-labelledby="mockHeading">
-        <h2 id="mockHeading">Mock 测试</h2>
-        <p class="provider-description">Mock 不访问网络，只返回固定测试译文，用于验证浮窗和保存流程。</p>
-        <button id="mockTestButton" type="button">测试 Mock</button>
-        <div id="mockStatus" class="operation-status" aria-live="polite"></div>
-      </section>
+        <section id="baiduSection" class="settings-section provider-section" aria-labelledby="baiduHeading">
+          <h2 id="baiduHeading">百度快速翻译</h2>
+          <label class="field-label" for="appIdInput">百度 APPID</label>
+          <input id="appIdInput" type="text" autocomplete="off" spellcheck="false">
+          <label class="field-label" for="appKeyInput">百度密钥（App Key）</label>
+          <input id="appKeyInput" type="password" autocomplete="new-password" spellcheck="false">
+          <p id="appKeyHint" class="field-hint"></p>
+          <div class="settings-actions">
+            <button id="baiduSaveButton" class="primary-button" type="button">保存百度配置</button>
+            <button id="baiduTestButton" type="button">测试百度</button>
+            <button id="baiduClearButton" class="danger-button" type="button">清除百度配置</button>
+          </div>
+          <div id="baiduStatus" class="operation-status" aria-live="polite"></div>
+        </section>
+
+        <section id="deepseekSection" class="settings-section provider-section" aria-labelledby="deepseekHeading">
+          <h2 id="deepseekHeading">DeepSeek AI 语境解析</h2>
+          <label class="field-label" for="deepseekApiKeyInput">DeepSeek API Key</label>
+          <input id="deepseekApiKeyInput" type="password" autocomplete="new-password" spellcheck="false">
+          <p id="deepseekKeyHint" class="field-hint"></p>
+          <label class="field-label" for="deepseekModelInput">Model ID</label>
+          <input id="deepseekModelInput" type="text" autocomplete="off" spellcheck="false" placeholder="deepseek-v4-flash">
+          <p class="field-hint">默认使用 deepseek-v4-flash，也可填写当前账号可用的其它模型，不限制白名单。</p>
+          <div class="settings-actions">
+            <button id="deepseekSaveButton" class="primary-button" type="button">保存 DeepSeek 配置</button>
+            <button id="deepseekTestButton" type="button">测试 DeepSeek</button>
+            <button id="deepseekClearButton" class="danger-button" type="button">清除 DeepSeek 配置</button>
+          </div>
+          <div id="deepseekStatus" class="operation-status" aria-live="polite"></div>
+        </section>
+
+        <section id="geminiSection" class="settings-section provider-section" aria-labelledby="geminiHeading">
+          <h2 id="geminiHeading">Gemini AI 语境解析</h2>
+          <label class="field-label" for="geminiApiKeyInput">Gemini API Key</label>
+          <input id="geminiApiKeyInput" type="password" autocomplete="new-password" spellcheck="false">
+          <p id="geminiKeyHint" class="field-hint"></p>
+          <label class="field-label" for="geminiModelInput">Model ID</label>
+          <input id="geminiModelInput" type="text" autocomplete="off" spellcheck="false" placeholder="gemini-3.5-flash">
+          <p class="field-hint">默认使用 gemini-3.5-flash，也可填写账号可用的其它 Gemini 文本模型。</p>
+          <div class="settings-actions">
+            <button id="geminiSaveButton" class="primary-button" type="button">保存 Gemini 配置</button>
+            <button id="geminiTestButton" type="button">测试 Gemini</button>
+            <button id="geminiClearButton" class="danger-button" type="button">清除 Gemini 配置</button>
+          </div>
+          <div id="geminiStatus" class="operation-status" aria-live="polite"></div>
+        </section>
+
+        <section id="mockSection" class="settings-section provider-section" aria-labelledby="mockHeading">
+          <h2 id="mockHeading">Mock 测试</h2>
+          <p class="provider-description">Mock 不访问网络，只返回固定测试译文，用于验证浮窗和保存流程。</p>
+          <button id="mockTestButton" type="button">测试 Mock</button>
+          <div id="mockStatus" class="operation-status" aria-live="polite"></div>
+        </section>
+      </details>
 
       <section class="security-note" aria-labelledby="securityHeading">
         <h2 id="securityHeading">本地测试说明</h2>

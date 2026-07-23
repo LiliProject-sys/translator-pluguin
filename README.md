@@ -30,6 +30,7 @@ Translator Plugin Chrome 版核心功能已基本完善，达到可供真实用�
 
 ## 当前阶段
 
+- Gateway Beta：新增本地 FastAPI Gateway 接入。普通用户可在设置页输入共享 Beta 测试访问码，插件验证成功后切换到 `provider: "gateway"`，并通过本地 `http://127.0.0.1:8000` 转发 Word Analysis 与 Sentence Translation。当前仍是本地 Beta 与 Cloud Run 准备阶段，不升级正式版本号。
 - Stage1：本地生词本、右键保存、popup 查看/删除/打开来源。
 - Stage2：划词后自动显示轻量收藏浮窗。
 - Stage3：区分未收录、单词已收录和当前语境已保存。
@@ -55,6 +56,8 @@ Translator Plugin Chrome 版核心功能已基本完善，达到可供真实用�
 
 ## 文件结构
 
+- `gateway/`：本地 FastAPI Gateway、固定服务端 Skill、Gemini 调用、合同 fixture、Dockerfile 和测试。
+- `gateway-language-provider.js`：Chrome 插件侧 Gateway Provider，固定本地 Gateway URL、Bearer Token、Envelope 解包和取消请求。
 - `manifest.json`：Manifest V3、权限、service worker、content script、popup 和设置页。
 - `background.js`：右键菜单、状态查询、统一语言处理、保存去重和设置页消息。
 - `content.js`：提取选区与上下文，显示状态感知浮窗并渲染翻译或语境解析。
@@ -437,6 +440,9 @@ Gemini 和 DeepSeek 共同使用 `sentence-translation-skill.js` 中的 `sentenc
 
 ## 安全说明
 
+- Gateway Beta Token 只通过 `Authorization: Bearer <Token>` 发送，不放入业务 JSON body。真实 Token、Gemini API Key 和 `gateway/.env` 不应提交到 Git。
+- Gateway 语言请求只发送白名单字段：`requestId`、`requestType`、`analysisMode`、`sourceLanguage`、`targetLanguage`、`text`、`contextSentence` 和可选 `pageTitle`。不发送 `pageUrl`、整页正文、`userQuestion`、Prompt、模型名、Provider 偏好或本地 API Key。
+- Gateway Beta 当前固定本地地址 `http://127.0.0.1:8000`，普通用户设置页不显示也不编辑 Gateway URL。Cloud Run 部署成功并完成远程 Beta 前，不将 manifest 版本升级到 `1.1.0`。
 - 百度密钥、DeepSeek API Key 和 Gemini API Key 不硬编码在源码中，也不会发送给 content script。
 - Service Worker 控制台只记录 Provider、HTTP 状态、内部错误码、requestId 及经过脱敏和截断的 API 错误信息；不记录凭据、请求头、选词、完整上下文、请求体或完整服务响应。
 - `chrome.storage.local` 不是加密保险箱。本实现适合个人本机 Demo，不适合共享电脑或把统一密钥打包公开发布。
