@@ -1,13 +1,22 @@
 const STORAGE_KEY = "vocabularyEntries";
+const AUTO_TRANSLATE_KEY = "autoTranslateEnabled";
 
 const entryCountElement = document.getElementById("entryCount");
 const emptyStateElement = document.getElementById("emptyState");
 const settingsButton = document.getElementById("settingsButton");
 const openVocabularyButton = document.getElementById("openVocabularyButton");
+const autoTranslateToggle = document.getElementById("autoTranslateToggle");
+const autoTranslateStatus = document.getElementById("autoTranslateStatus");
 
-document.addEventListener("DOMContentLoaded", renderSummary);
+let autoTranslateEnabled = true;
+
+document.addEventListener("DOMContentLoaded", () => {
+  renderSummary();
+  renderAutoTranslateSetting();
+});
 settingsButton.addEventListener("click", openSettings);
 openVocabularyButton.addEventListener("click", openVocabularyBook);
+autoTranslateToggle.addEventListener("click", toggleAutoTranslate);
 
 function openSettings() {
   chrome.runtime.openOptionsPage(() => {
@@ -38,4 +47,56 @@ function renderSummary() {
     entryCountElement.textContent = `${entries.length} 个词条`;
     emptyStateElement.hidden = entries.length > 0;
   });
+}
+
+function renderAutoTranslateSetting() {
+  chrome.storage.local.get({ [AUTO_TRANSLATE_KEY]: true }, (result) => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to read auto translate setting:", chrome.runtime.lastError.message);
+      showAutoTranslateStatus("设置读取失败");
+      updateAutoTranslateToggle(autoTranslateEnabled);
+      return;
+    }
+
+    autoTranslateEnabled = getAutoTranslateEnabledFromStorageValue(result[AUTO_TRANSLATE_KEY]);
+    updateAutoTranslateToggle(autoTranslateEnabled);
+    showAutoTranslateStatus("");
+  });
+}
+
+function toggleAutoTranslate() {
+  const previousValue = autoTranslateEnabled;
+  const nextValue = !previousValue;
+
+  autoTranslateToggle.disabled = true;
+  showAutoTranslateStatus("");
+  updateAutoTranslateToggle(nextValue);
+
+  chrome.storage.local.set({ [AUTO_TRANSLATE_KEY]: nextValue }, () => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to save auto translate setting:", chrome.runtime.lastError.message);
+      autoTranslateEnabled = previousValue;
+      updateAutoTranslateToggle(previousValue);
+      showAutoTranslateStatus("保存失败，请重试");
+      autoTranslateToggle.disabled = false;
+      return;
+    }
+
+    autoTranslateEnabled = nextValue;
+    updateAutoTranslateToggle(nextValue);
+    autoTranslateToggle.disabled = false;
+  });
+}
+
+function updateAutoTranslateToggle(enabled) {
+  autoTranslateToggle.setAttribute("aria-checked", enabled ? "true" : "false");
+  autoTranslateToggle.textContent = enabled ? "开启" : "关闭";
+}
+
+function showAutoTranslateStatus(message) {
+  autoTranslateStatus.textContent = message;
+}
+
+function getAutoTranslateEnabledFromStorageValue(value) {
+  return value === undefined ? true : value !== false;
 }

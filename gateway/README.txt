@@ -6,14 +6,14 @@ Translator-plugin Gateway Beta 本地服务说明
 - 本地 FastAPI Gateway；
 - 本地 /health、/v1/auth/verify、/v1/language；
 - Gateway 固定调用 Gemini 模型 gemini-3.1-flash-lite；
-- Chrome 插件本地开发地址 http://127.0.0.1:8000；
-- Cloud Run 部署文件准备，但不实际部署。
+- Chrome 插件当前 Beta 默认连接 Cloud Run 远程 Gateway；
+- 本地 http://127.0.0.1:8000 仅用于开发调试。
 
 本阶段不包含：
 - 用户账号、注册、登录、支付；
 - 数据库、Redis、云端生词本；
 - DeepSeek 或百度中转；
-- Cloud Run 实际部署；
+- 已部署的 Cloud Run 服务端本身；
 - 远程朋友 Beta 打包；
 - manifest 版本升级到 1.1.0。
 
@@ -23,7 +23,7 @@ Translator-plugin Gateway Beta 本地服务说明
 - GEMINI_MODEL：默认 gemini-3.1-flash-lite；
 - PORT：本地或 Cloud Run 注入端口。
 
-本地推荐启动方式：
+本地开发推荐启动方式：
 .\gateway\启动本地网关.ps1
 
 脚本说明：
@@ -37,15 +37,15 @@ Translator-plugin Gateway Beta 本地服务说明
 - Uvicorn 在当前窗口前台运行，按 Ctrl+C 停止。
 
 注意：
-- 127.0.0.1 只供本机 Chrome 插件使用；
-- 朋友远程使用需要未来部署 Cloud Run；
+- 本地脚本只用于开发调试，不是普通用户远程 Beta 的启动方式；
+- 当前插件 Beta 默认连接 Cloud Run，普通用户不需要运行本地 Gateway；
+- 127.0.0.1 只供开发者本机调试使用；
 - Cloud Run Source Deploy 应在仓库的 gateway/ 目录执行，gateway/ 是 Docker build context；
 - Dockerfile 的 COPY 路径均以 gateway/ 为根，不依赖仓库根目录；
 - 容器启动后监听 0.0.0.0，并读取 Cloud Run 注入的 PORT，默认回退 8080；
 - Cloud Run 不使用本地启动脚本，也不读取本地 .env，而是使用平台环境变量；
-- BETA_ACCESS_TOKEN 与 GEMINI_API_KEY 将来通过 Secret Manager 或等价安全方式注入；
-- GEMINI_MODEL 将来通过 Cloud Run 平台环境变量设置；
-- 当前阶段只完成部署准备与审计，尚未实际部署 Cloud Run。
+- BETA_ACCESS_TOKEN 与 GEMINI_API_KEY 通过 Secret Manager 或等价安全方式注入；
+- GEMINI_MODEL 通过 Cloud Run 平台环境变量设置。
 
 隐私约束：
 - Token 只通过 Authorization: Bearer 发送；

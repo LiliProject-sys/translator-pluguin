@@ -199,7 +199,7 @@ function testStaticUiAndCompatibility() {
   const background = fs.readFileSync(path.join(projectRoot, "background.js"), "utf8");
   const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "1.0.1");
+  assert.equal(manifest.version, "1.0.2");
   assert(content.includes("详细解释"));
   assert(content.includes('analysisMode: "detail"'));
   assert(content.includes("formatLemmaDisplay"));

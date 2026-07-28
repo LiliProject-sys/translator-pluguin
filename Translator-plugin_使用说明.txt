@@ -1,4 +1,4 @@
-Translator-plugin 使用说明
+Orange翻译 使用说明
 
 版本：v1.0.0 稳定体验版
 
@@ -16,9 +16,9 @@ chrome://extensions/
 
 4. 点击“加载已解压的扩展程序”。
 
-5. 选择包含 manifest.json 的 Translator-plugin 项目根目录。
+5. 选择包含 manifest.json 的 Orange翻译 插件目录。
 
-成功后即可在 Chrome 工具栏看到 Translator-plugin。
+成功后即可在 Chrome 工具栏看到 Orange翻译。
 
 二、配置 Provider
 

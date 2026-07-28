@@ -1,8 +1,8 @@
-# Translator-plugin Architecture
+# Orange翻译 Architecture
 
 ## Overview
 
-Translator-plugin is a Chrome Manifest V3 extension. It uses native HTML, CSS, and JavaScript only. There is no build step, backend server, or database.
+Orange翻译 is a Chrome Manifest V3 extension. It uses native HTML, CSS, and JavaScript only. There is no build step, backend server, or database.
 
 ## Main Runtime Parts
 

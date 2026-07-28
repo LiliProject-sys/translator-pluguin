@@ -1,0 +1,188 @@
+Translator-plugin 多词短语与短标题模式判断修复整体变更报告
+生成时间：2026-07-27 13:50
+
+1. 本轮基本信息
+
+项目目录：D:\Project_Experimental\Translator_Plugin
+当前分支：feat/gateway-beta
+当前 HEAD：06804a22d02ffe62fd714aaae1d50ff01ababb14
+本轮目标：修复短标题、短语、多词文本误走 Word Analysis 的问题。
+本轮边界：只修改选择文本的 requestType 判断、相关测试和 README 中冲突说明。
+本轮未执行：git add、git commit、git push、Cloud Run 部署、朋友测试包重新打包、Chrome GUI 人工验收。
+
+2. 修改前行为
+
+旧规则位于 content.js 的 detectSelectionRequestType(selectedText)。
+旧规则依赖：
+- 是否包含 . ? ! ;
+- wordCount > 10
+- text.length > 80
+
+因此短标题和短语会被误判：
+- Definition of LLM Agent 没有句末标点、词数不超过 10、长度不超过 80，旧规则会进入 wordAnalysis。
+- A Roadmap of Agent Research and Development 同样容易进入 wordAnalysis。
+- machine learning、Security and Privacy、in terms of 等多词文本也可能被当成单词分析。
+
+问题来源说明：
+这是原有 detectSelectionRequestType() 启发式中的边界问题，在自动翻译开关与中文过滤功能完成后的人工测试中被发现。
+目前没有证据表明它是自动翻译开关或中文过滤引入的回归。中文过滤和开关发生在模式判断之前；纯英文短标题不会触发中文过滤。
+
+3. 修改后行为
+
+新规则冻结为“内部空白”判断：
+- selectedText trim 后为空：保持外层安全行为，函数返回 wordAnalysis，不发送无效请求由外层控制。
+- trim 后没有内部空白：wordAnalysis。
+- trim 后存在至少一个内部空白：sentenceTranslation。
+
+连续词项示例：
+- roadmap -> wordAnalysis
+- roadmap. -> wordAnalysis
+- state-of-the-art -> wordAnalysis
+- state‑of‑the‑art -> wordAnalysis
+- don't / don’t / user's -> wordAnalysis
+- GPT-4 / LLM-based / agent-based -> wordAnalysis
+
+多词文本示例：
+- machine learning -> sentenceTranslation
+- machine    learning -> sentenceTranslation
+- machine\tlearning -> sentenceTranslation
+- machine\nlearning -> sentenceTranslation
+- machine\u00A0learning -> sentenceTranslation
+- Definition of LLM Agent -> sentenceTranslation
+- A Roadmap of Agent Research and Development -> sentenceTranslation
+- Security and Privacy -> sentenceTranslation
+
+sentenceTranslation 的 requestType 名称保持不变，但产品语义现在承载短语、固定搭配、标题、句子和段落的整体翻译。
+
+4. 实际修改文件与函数
+
+content.js
+- 修改 detectSelectionRequestType(selectedText)。
+- 移除模式判断对句末标点、词数大于 10、长度大于 80 的依赖。
+- 改为 selectedText.trim() 后检测 /\s/u。
+- 未修改 autoTranslateEnabled、selectionIntentId、中文过滤、浮窗 UI、保存逻辑、CHECK / TRANSLATE 发送时机。
+
+tests/stage13-sentence-translation.test.js
+- 更新 helper 级模式判断测试，覆盖连续词项、短语、标题、NBSP、tab、换行、trim、弯撇号和特殊连字符。
+- 增加加载真实 content.js 的 VM 链路测试。
+- mock chrome.storage.local.get、chrome.storage.onChanged.addListener、chrome.runtime.sendMessage、selection、range 和 document 环境。
+- 模拟 Definition of LLM Agent 与 A Roadmap of Agent Research and Development。
+- 捕获最终 TRANSLATE_TEXT message，断言 payload.text 保持完整选区，requestType 为 sentenceTranslation，未缩减为 capability 或 roadmap。
+
+README.md
+- 最小修正 Stage13 说明：Sentence Translation 由旧阈值描述改为内部空白的短语、固定搭配、标题、句子或段落整体翻译。
+- 修正手动验收清单，不再要求 reinforcing effect 进入 Word Analysis。
+
+5. 真实调用链与 payload 变化
+
+真实链路测试覆盖：
+用户选中 Definition of LLM Agent
+-> content.js 读取真实 selection
+-> getSelectionContext() 生成快照
+-> detectSelectionRequestType() 判定 sentenceTranslation
+-> showSelectionPanel() 创建浮窗
+-> requestTranslation() 发送 TRANSLATE_TEXT
+
+断言结果：
+- payload.text === "Definition of LLM Agent"
+- payload.requestType === "sentenceTranslation"
+- payload.text 未被缩减成 capability
+
+第二个样例：
+- payload.text === "A Roadmap of Agent Research and Development"
+- payload.requestType === "sentenceTranslation"
+- payload.text 未被缩减成 roadmap
+
+Gateway payload、Provider、Skill、Schema 和 Storage 均未修改。
+
+6. 自动测试与实际结果
+
+已通过语法检查：
+- node --check content.js
+- node --check tests/stage13-sentence-translation.test.js
+- node --check tests/stage18_2-sentence-boundary-heuristic.test.js
+- 递归 node --check 所有 JS：js-syntax-ok
+
+已通过指定测试：
+- node tests/stage13-sentence-translation.test.js
+- node tests/stage18_2-sentence-boundary-heuristic.test.js
+- node tests/auto-translate-toggle-and-han-filter.test.js
+- node tests/stage10-floating-panel-interaction.test.js
+- node tests/stage11-floating-panel-resize.test.js
+- node tests/v1.0.1-floating-panel-persistence.test.js
+- node tests/gateway-provider.test.js
+
+已通过全量测试：
+- tests/*.test.js 全部通过，输出 all-tests-ok。
+
+已通过 diff 检查：
+- git diff --check 通过。
+- 仅出现 LF 将被 CRLF 替换的 Git 工作区提示，不是 diff whitespace 错误。
+
+旧启发式搜索结果：
+- wordCount > 10 和 text.length > 80 只剩在 Stage13 测试中作为“确认 content.js 不包含旧规则”的断言。
+- content.js 中仍有 wordCount 变量用于 Stage18.1 contextTranslation 是否跳过孤立短词的逻辑，与本轮 requestType 判断无关。
+
+7. 用户人工验收清单
+
+尚未进行人工 Chrome GUI 验收。建议用户验证：
+- roadmap -> 单词分析
+- roadmap. -> 单词分析
+- state-of-the-art -> 单词分析
+- don’t -> 单词分析
+- machine learning -> 整体翻译
+- Definition of LLM Agent -> 整体翻译
+- A Roadmap of Agent Research and Development -> 整体翻译
+- 完整 Abstract 段落 -> 整体翻译
+- 中文选区 -> 仍然静默
+- 关闭自动翻译开关 -> 仍停止自动翻译
+- 重新开启 -> 下一次英文选区恢复
+
+8. Git 状态与历史改动边界
+
+本轮没有执行 git add、git commit、git push。
+当前工作区在本轮开始前已有多轮未提交修改，包括 Gateway/Cloud Run、自动翻译开关、中文过滤、测试和报告文件。
+
+本轮直接相关修改：
+- content.js 的 detectSelectionRequestType()
+- tests/stage13-sentence-translation.test.js 的模式判断与真实链路测试
+- README.md 中 Stage13 说明和手动验收项
+- 本报告文件
+
+当前工作区仍包含历史未提交改动：
+- PRIVACY.md
+- gateway-language-provider.js
+- gateway/README.txt
+- manifest.json
+- popup.css / popup.html / popup.js
+- tests/gateway-provider.test.js
+- tests/stage10-floating-panel-interaction.test.js
+- tests/stage18_2-sentence-boundary-heuristic.test.js
+- tests/auto-translate-toggle-and-han-filter.test.js
+- report_log 中多份 Gateway / Plan / 变更报告
+- tools、release/WPS 相关未跟踪目录
+
+这些不是本轮全部产生的改动，本轮没有清理、回滚或归并它们。
+
+9. 未完成项和风险
+
+未完成项：
+- 未进行真实 Chrome GUI 验收。
+- 未重新部署 Cloud Run，本轮也不需要部署。
+- 未重新生成朋友测试包，本轮也按要求未打包。
+- 未 commit/push。
+
+风险：
+- 新规则非常简单，按“是否存在内部空白”决定整体翻译。它不判断语法完整性。
+- 单个连续词项即使带句末标点，例如 roadmap.，仍按 Word Analysis。这是本轮冻结边界，未来可作为独立问题处理。
+- 连字符、撇号、弯撇号和数字连接词不需要特殊 tokenizer，仍视为单个连续词项。
+- sentenceTranslation 名称未变，但现在也承担短语和标题整体翻译，后续文案可以继续细化。
+
+10. 给 ChatGPT 的快速上下文
+
+本轮修复的是原有 detectSelectionRequestType() 启发式边界问题。
+修改前：句末标点 / 超过 10 词 / 超过 80 字符才进入 sentenceTranslation。
+修改后：trim 后包含内部空白就进入 sentenceTranslation，否则进入 wordAnalysis。
+真实链路测试已证明 Definition of LLM Agent 和 A Roadmap of Agent Research and Development 会完整作为 payload.text 发送，并且 requestType 为 sentenceTranslation。
+Gateway、Cloud Run、Skill、Schema、Provider、Storage、中文过滤、自动翻译开关、保存逻辑和浮窗 UI 均未做产品层修改。
+所有 Node 测试和 JS 语法检查已通过；Chrome GUI 仍需用户手动验证。

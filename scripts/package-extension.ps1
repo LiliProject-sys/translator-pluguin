@@ -33,6 +33,9 @@ $packageFiles = @(
   "vocabulary.html",
   "vocabulary.css",
   "vocabulary.js",
+  "icons/16_16.png",
+  "icons/32_32.png",
+  "icons/128_128.png",
   "README.md",
   "PRIVACY.md",
   "SECURITY.md"
@@ -58,7 +61,7 @@ $outputRoot = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
 
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 
-$zipPath = Join-Path $outputRoot "Translator-plugin-v$version-chromium.zip"
+$zipPath = Join-Path $outputRoot "Orange翻译-v$version-chromium.zip"
 if (Test-Path -LiteralPath $zipPath) {
   Remove-Item -LiteralPath $zipPath -Force
 }
@@ -90,7 +93,7 @@ try {
     throw "Package does not contain root manifest.json."
   }
 
-  $forbiddenPattern = '(^|/)(\.git|\.agents|\.codex|tests|report_log|重要记录|release|node_modules|dist|build)(/|$)|\.(zip|docx|png|pdf|crx|xpi)$'
+  $forbiddenPattern = '(^|/)(\.git|\.agents|\.codex|tests|report_log|重要记录|release|node_modules|dist|build)(/|$)|\.(zip|docx|pdf|crx|xpi)$|(^|/)(?!icons/(16_16|32_32|128_128)\.png$).+\.png$'
   $forbiddenEntries = $entries | Where-Object { $_ -match $forbiddenPattern }
   if ($forbiddenEntries.Count -gt 0) {
     throw "Package contains forbidden entries: $($forbiddenEntries -join ', ')"

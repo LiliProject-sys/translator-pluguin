@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Translator-plugin",
+  "name": "Orange翻译",
+  "short_name": "Orange翻译",
   "description": "使用快速翻译或 AI 理解划选单词、句子和段落，并保存英文词语及上下文。",
-  "version": "1.0.1",
+  "version": "1.0.2",
+  "icons": {
+    "16": "icons/16_16.png",
+    "32": "icons/32_32.png",
+    "128": "icons/128_128.png"
+  },
   "permissions": [
     "contextMenus",
     "storage",
@@ -16,15 +22,19 @@
     "https://fanyi-api.baidu.com/*",
     "https://api.deepseek.com/*",
     "https://generativelanguage.googleapis.com/*",
-    "http://127.0.0.1:8000/*"
+    "https://translator-gateway-beta-268073468344.asia-northeast1.run.app/*"
   ],
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
   },
   "action": {
-    "default_title": "Translator-plugin",
-    "default_popup": "popup.html"
+    "default_title": "Orange翻译",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16_16.png",
+      "32": "icons/32_32.png"
+    }
   },
   "content_scripts": [
     {

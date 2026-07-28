@@ -3,19 +3,30 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Translator-plugin</title>
+    <title>Orange翻译</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
     <header class="popup-header">
       <div>
-        <h1>Translator-plugin</h1>
+        <h1>Orange翻译</h1>
         <p id="entryCount" class="entry-count">0 个词条</p>
       </div>
       <button id="settingsButton" class="settings-button" type="button">设置</button>
     </header>
 
     <main>
+      <section class="auto-translate-row" aria-labelledby="autoTranslateLabel">
+        <span id="autoTranslateLabel" class="auto-translate-label">划词自动翻译</span>
+        <button
+          id="autoTranslateToggle"
+          class="auto-translate-switch"
+          type="button"
+          role="switch"
+          aria-checked="true"
+        >开启</button>
+      </section>
+      <p id="autoTranslateStatus" class="popup-status" aria-live="polite"></p>
       <button id="openVocabularyButton" class="open-vocabulary-button" type="button">打开生词本</button>
       <section id="emptyState" class="empty-state" hidden>
         还没有保存词条。请在网页中选中文字后点击浮窗加入，也可以右键加入生词本。

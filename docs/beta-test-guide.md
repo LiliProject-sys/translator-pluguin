@@ -2,12 +2,12 @@
 
 ## Install From ZIP
 
-1. Unzip the package to a normal folder, for example `Translator-plugin`.
+1. Unzip the package to a normal folder, for example `Orange翻译`.
 2. Open Chrome and go to `chrome://extensions`.
 3. Turn on Developer mode.
 4. Click "Load unpacked".
 5. Select the unzipped folder that contains `manifest.json`.
-6. Confirm the extension name is `Translator-plugin`.
+6. Confirm the extension name is `Orange翻译`.
 
 ## Configure A Provider
 

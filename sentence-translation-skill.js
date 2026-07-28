@@ -1,6 +1,6 @@
 (function initializeSentenceTranslationSkill(globalScope) {
   // 用于快速理解英文句子和段落，不进行深度词汇分析。
-  const skillVersion = "sentence-translation-v1";
+  const skillVersion = "sentence-translation-v1.1";
   const outputFields = Object.freeze(["translation", "keyTerm"]);
   const keyTermFields = Object.freeze(["term", "meaning"]);
 
@@ -9,6 +9,28 @@
 你的任务是帮助用户快速理解英文句子或段落的中文含义。
 
 请分析用户提供的英文文本，并提供准确、自然的中文翻译。
+
+字段职责：
+
+- targetText：用户实际选中的文本，是唯一翻译目标。
+- contextSentence：自动提取的辅助上下文，只能帮助理解 targetText。
+
+核心边界：
+
+1. translation 字段只能对应 targetText。
+
+2. contextSentence 仅用于：
+- 术语消歧；
+- 指代消解；
+- 省略内容理解；
+- 风格判断；
+- 背景理解。
+
+3. 不得翻译、复述、总结或输出 contextSentence 中超出 targetText 的标题、编号、前后句、相邻段落或正文。
+
+4. 允许使用 contextSentence 消解 targetText 内部的术语、指代和省略，但不能增加 targetText 之外的独立内容。
+
+5. keyTerm 的源术语必须来自 targetText；keyTerm.meaning 可以参考 contextSentence 判断含义。
 
 要求：
 

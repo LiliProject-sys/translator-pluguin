@@ -1,10 +1,12 @@
 # Privacy Policy
 
-Translator-plugin is a local Chrome Extension demo for vocabulary collection, quick translation, and AI-assisted reading.
+Orange翻译 is a local Chrome Extension demo for vocabulary collection, quick translation, and AI-assisted reading.
 
-Gateway Beta local mode sends selected text, the context sentence, and an optional page title to the local Gateway at `http://127.0.0.1:8000`. The Gateway then uses a server-side Gemini API key. The extension does not send page URLs, whole-page text, cookies, browser history, local file paths, full vocabulary data, prompts, model names, provider preferences, or local BYOK API keys to the Gateway.
+Gateway Beta sends selected text, the necessary context sentence, and an optional page title to the Google Cloud Run Gateway at `https://translator-gateway-beta-268073468344.asia-northeast1.run.app`. The Gateway then uses a server-side Gemini API key stored in Secret Manager. The extension does not send page URLs, whole-page text, cookies, browser history, local file paths, full vocabulary data, prompts, model names, provider preferences, user identity, or local BYOK API keys to the Gateway.
 
 The shared Beta Token is sent only as an `Authorization: Bearer <Token>` header, not in the language JSON body. Real tokens and Gemini API keys must not be committed to Git, reports, README files, manifests, or tests.
+
+Advanced BYOK providers remain separate optional modes. In Gateway Beta mode, ordinary users only need the shared Beta Token and do not need to provide a Gemini API key.
 
 ## Data The Extension Reads
 

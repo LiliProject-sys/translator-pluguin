@@ -6,6 +6,8 @@ const TOAST_ID = "web-vocabulary-collector-toast";
 const FLOATING_PANEL_ID = "translator-plugin-selection-panel";
 const FLOATING_PANEL_STYLE_ID = "translator-plugin-selection-panel-style";
 const FLOATING_PANEL_MARGIN = 10;
+const AUTO_TRANSLATE_KEY = "autoTranslateEnabled";
+const HAN_PATTERN = /\p{Script=Han}/u;
 
 let currentSelectionSnapshot = null;
 let currentSelectionRect = null;
@@ -19,6 +21,10 @@ let mouseupTimer = null;
 let panelPointerDown = false;
 let currentSelectionId = 0;
 let detailAnalysisRequestId = 0;
+let selectionIntentId = 0;
+let autoTranslateEnabled = false;
+let autoTranslateSettingsReady = false;
+let autoTranslateSettingsPromise = loadAutoTranslateSettings();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !message.type) {
@@ -98,7 +104,21 @@ document.addEventListener("keydown", (event) => {
 
 window.addEventListener("resize", keepSelectionPanelInViewport);
 
-function showPanelForCurrentSelection() {
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes || !changes[AUTO_TRANSLATE_KEY]) {
+    return;
+  }
+
+  autoTranslateEnabled = getAutoTranslateEnabledFromStorageValue(changes[AUTO_TRANSLATE_KEY].newValue);
+  autoTranslateSettingsReady = true;
+
+  if (!autoTranslateEnabled) {
+    selectionIntentId += 1;
+    closeSelectionPanel();
+  }
+});
+
+async function showPanelForCurrentSelection() {
   const selection = window.getSelection();
   const selectedText = selection ? selection.toString().trim() : "";
 
@@ -115,7 +135,18 @@ function showPanelForCurrentSelection() {
     return;
   }
 
-  cancelLanguageRequests(getCurrentLanguageRequestIds());
+  const intentId = ++selectionIntentId;
+  closeSelectionPanel();
+
+  await autoTranslateSettingsPromise;
+  if (intentId !== selectionIntentId) {
+    return;
+  }
+
+  if (!autoTranslateEnabled || containsHanScript(selectedText)) {
+    return;
+  }
+
   currentSelectionSnapshot = getSelectionContext();
   currentSelectionRect = copyRect(rect);
   const selectionId = ++currentSelectionId;
@@ -127,6 +158,32 @@ function showPanelForCurrentSelection() {
   checkCurrentSelectionStatus(selectionId);
   updateLanguageLoadingLabel(selectionId);
   requestTranslation(selectionId);
+}
+
+function loadAutoTranslateSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [AUTO_TRANSLATE_KEY]: true }, (result) => {
+      if (chrome.runtime.lastError) {
+        console.error("Failed to read auto translate setting:", chrome.runtime.lastError.message);
+        autoTranslateEnabled = false;
+        autoTranslateSettingsReady = true;
+        resolve(false);
+        return;
+      }
+
+      autoTranslateEnabled = getAutoTranslateEnabledFromStorageValue(result[AUTO_TRANSLATE_KEY]);
+      autoTranslateSettingsReady = true;
+      resolve(autoTranslateEnabled);
+    });
+  });
+}
+
+function getAutoTranslateEnabledFromStorageValue(value) {
+  return value === undefined ? true : value !== false;
+}
+
+function containsHanScript(text) {
+  return HAN_PATTERN.test(typeof text === "string" ? text : "");
 }
 
 function getUsefulSelectionRect(range) {
@@ -683,15 +740,12 @@ function formatLemmaDisplay(lemma, selectedWord) {
 }
 
 function detectSelectionRequestType(selectedText) {
-  const text = normalizeWhitespace(selectedText);
+  const text = typeof selectedText === "string" ? selectedText.trim() : "";
   if (!text) {
     return "wordAnalysis";
   }
 
-  const wordCount = text.split(/\s+/).filter(Boolean).length;
-  return /[.?!;]/.test(text) || wordCount > 10 || text.length > 80
-    ? "sentenceTranslation"
-    : "wordAnalysis";
+  return /\s/u.test(text) ? "sentenceTranslation" : "wordAnalysis";
 }
 
 function openTranslationOptions() {

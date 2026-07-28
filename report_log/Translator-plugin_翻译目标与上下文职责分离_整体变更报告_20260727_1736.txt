@@ -1,0 +1,254 @@
+Translator-plugin 翻译目标与上下文职责分离整体变更报告
+生成时间：2026-07-27 17:36
+
+1. 本轮基本信息
+
+项目目录：D:\Project_Experimental\Translator_Plugin
+当前分支：feat/gateway-beta
+当前 HEAD：06804a22d02ffe62fd714aaae1d50ff01ababb14
+本轮目标：修复 sentenceTranslation 中模型可能把 contextSentence 的相邻标题、编号、前后句或正文一并翻译输出的问题。
+本轮未执行：git add、git commit、git push、Cloud Run 部署、朋友测试包重新打包、Chrome GUI 人工验收。
+
+2. 修改前行为
+
+前端已经正确将用户选区作为 payload.text，并将自动提取上下文作为 payload.contextSentence。
+Gateway body 也已经分别发送 text 和 contextSentence。
+但是 Sentence Translation Prompt 只说明返回 translation/keyTerm，没有明确冻结：
+- text / targetText 是唯一翻译目标；
+- contextSentence 只能辅助理解；
+- contextSentence 不得被翻译、复述、总结或输出；
+- keyTerm.term 必须来自 targetText。
+
+因此模型在 targetText 是短标题或短句、contextSentence 包含标题编号和下方正文时，可能把上下文中的额外内容也加入 translation。
+
+3. 修改后行为
+
+字段职责已在 JS Skill 与 Gateway Python Skill 中明确：
+- text / targetText：用户实际选中的唯一 TARGET TEXT。
+- contextSentence：CONTEXT ONLY，仅用于术语消歧、指代消解、省略内容理解、风格判断和背景理解。
+
+translation 字段只能对应 targetText。
+不得翻译、复述、总结或输出 contextSentence 中超出 targetText 的标题、编号、前后句、相邻段落或正文。
+允许 contextSentence 消解 targetText 内部的术语、指代和省略，但不能增加 targetText 之外的独立内容。
+keyTerm.term 必须来自 targetText；keyTerm.meaning 可以参考 contextSentence 判断含义。
+
+4. 实际修改文件和函数
+
+sentence-translation-skill.js
+- 将 skillVersion 从 sentence-translation-v1 升级为 sentence-translation-v1.1。
+- 在 instructions 中加入 targetText / contextSentence 职责分离。
+- 明确 translation 只能对应 targetText。
+- 明确 contextSentence 只能辅助理解，不得输出超出 targetText 的独立内容。
+- 明确 keyTerm.term 必须来自 targetText，keyTerm.meaning 可参考 contextSentence。
+- 未修改 buildInput、validateTranslation、outputSchema。
+
+gateway/app/skills/sentence_translation.py
+- 将 SKILL_VERSION 从 sentence-translation-v1 升级为 sentence-translation-v1.1。
+- 在 build_prompt() 的 system prompt 中加入同等 TARGET / CONTEXT 约束。
+- 保留现有 user 字段 targetText / contextSentence，不修改 Gateway schema。
+
+gateway/contracts/fixtures/sentence-success.json
+- 将 fixture 中 skillVersion 更新为 sentence-translation-v1.1。
+
+tests/stage13-sentence-translation.test.js
+- 更新 Skill version 断言为 sentence-translation-v1.1。
+- 增加 JS Skill instructions 中 TARGET / CONTEXT / keyTerm 约束断言。
+- 增加 context 缺失时 buildInput() 回退到 targetText 的测试。
+- 增加 target 在 context 中重复出现时仍保留 target/context 分离的测试。
+- 增加 Gemini / DeepSeek 最终 system prompt 继承 Skill instructions 的测试，未修改 Provider 包装器运行时代码。
+- 扩展真实 content.js VM 链路测试，验证 payload.text 是完整选区，payload.contextSentence 是辅助上下文，二者不覆盖、不拼接。
+
+tests/gateway-provider.test.js
+- 增加 Gateway Provider sentenceTranslation body 测试。
+- 验证 body.text === selectedText，body.contextSentence === context。
+- 验证 body.text 不包含 context 额外正文。
+- 验证 userQuestion/pageUrl 仍不进入 Gateway body。
+
+gateway/tests/test_gateway_contract.py
+- 新增 Gateway Prompt 构造测试。
+- 验证 system prompt 包含 targetText is the only TARGET TEXT、contextSentence is CONTEXT ONLY、translation 只对应 targetText、不得输出 context 额外内容、keyTerm.term must come from targetText。
+- 新增指代消解场景测试，验证 Prompt 允许 context 用于 pronoun resolution / ellipsis recovery，但不得添加 targetText 外独立内容。
+
+README.md
+- 更新 Sentence Translation Skill 版本为 sentence-translation-v1.1。
+- 增加 target/context 职责分离说明。
+- 说明 Gateway Python Skill 修改后需要重新部署 Cloud Run 才会影响远程 Gateway Beta。
+
+5. Provider 包装器是否修改
+
+未修改 gemini-context-provider.js。
+原因：审计确认 Gemini sentenceTranslation 分支的 createModeInstructions() 完整拼接 sentenceTranslationSkill.instructions。修改 Skill instructions 后，Gemini 最终 system_instruction 会继承 TARGET / CONTEXT 约束。
+
+未修改 deepseek-context-provider.js。
+原因：审计确认 DeepSeek sentenceTranslation 分支的 createRequestBody() 使用 `${skill.instructions} ${jsonRules}`。修改 Skill instructions 后，DeepSeek system message 会继承 TARGET / CONTEXT 约束。
+
+本轮通过测试确认 Provider 没有覆盖或删除 Skill instructions。
+
+6. Word Analysis 是否修改
+
+未修改 gateway/app/skills/word_analysis.py。
+未修改 ai-context-skill.js。
+
+原因：
+本轮问题发生在 sentenceTranslation 输出包含 context 额外内容。当前 Word Skill 已有“只回答当前划选词汇”的约束，并未人工复现到整句 context 被一起翻译的问题。为避免扩大范围，本轮只保留回归测试，不修改 Word Analysis Prompt。
+
+7. skillVersion 与缓存依据
+
+审计函数：
+- gemini-context-provider.js:createCacheKey(input, model, skillVersion, analysisMode, requestType)
+- deepseek-context-provider.js:createCacheKey(input, model, skillVersion, analysisMode, requestType)
+
+缓存键包含：
+- requestType
+- analysisMode
+- targetText
+- contextSentence
+- pageTitle
+- model
+- skillVersion
+
+决策：
+由于本地 Gemini / DeepSeek Provider 的 sentenceTranslation 结果缓存包含 skillVersion，若 Prompt 修改但 version 不变，同一个 service worker 生命周期内可能命中旧 Prompt 结果。因此本轮将 Sentence Translation Skill 升级为 sentence-translation-v1.1。
+
+Gateway 路径当前没有客户端 sentenceTranslation 结果缓存，但 Gateway response 仍返回 skillVersion。升级版本有利于诊断和前后行为区分。
+
+8. 请求字段是否改变
+
+未改变公开协议字段。
+仍使用：
+- text
+- contextSentence
+- requestType
+- analysisMode
+- sourceLanguage
+- targetLanguage
+- pageTitle
+
+未新增 targetText/contextText 公共字段。
+Gateway schema 未修改。
+background.js、translation-provider.js、gateway-language-provider.js 未修改。
+
+9. Gateway 部署与本地扩展生效边界
+
+Gateway Python Skill 已修改：
+- gateway/app/skills/sentence_translation.py
+
+因此远程 Gateway Beta 要真实生效，必须重新部署 Cloud Run。
+本轮未部署 Cloud Run。
+未部署前，远程 Gateway Beta 仍使用旧 Prompt。
+
+本地 JS Skill 已修改：
+- sentence-translation-skill.js
+
+本地 Gemini / DeepSeek Provider 路径需要重新加载扩展后生效。
+本轮未执行真实 Chrome 重新加载或 GUI 验收。
+
+不需要修改：
+- Cloud Run URL
+- Secret Manager
+- Gemini API Key
+- Beta Token
+- 插件 Gateway 地址
+- 用户访问码
+- manifest 版本
+
+10. 自动测试与实际结果
+
+已通过语法检查：
+- node --check sentence-translation-skill.js
+- node --check tests/stage13-sentence-translation.test.js
+- node --check tests/gateway-provider.test.js
+- python -m py_compile gateway/app/skills/sentence_translation.py gateway/tests/test_gateway_contract.py
+- 递归 node --check 所有 JS：js-syntax-ok
+
+已通过重点测试：
+- node tests/stage13-sentence-translation.test.js
+- node tests/gateway-provider.test.js
+- python -m unittest gateway.tests.test_gateway_contract
+
+已通过回归测试：
+- node tests/auto-translate-toggle-and-han-filter.test.js
+- node tests/stage10-floating-panel-interaction.test.js
+- node tests/stage11-floating-panel-resize.test.js
+- node tests/v1.0.1-floating-panel-persistence.test.js
+- node tests/stage18_1-vocabulary-context-recall.test.js
+
+已通过全量 Node 测试：
+- tests/*.test.js 全部通过，输出 all-tests-ok。
+
+已通过 diff 检查：
+- git diff --check 通过。
+- 仅出现 Git 关于 LF 将被 CRLF 替换的提示，不是 whitespace error。
+
+11. 仍需用户人工验收
+
+尚未进行 Chrome GUI 人工验收。
+尚未部署 Cloud Run。
+
+真实 Gateway 部署后建议验证：
+- 选中 Definition of LLM Agent，只翻译标题，不出现 2.1 编号和下方正文。
+- 选中 These agents exhibit remarkable capabilities.，可借助上文理解 These agents，但只输出该句译文。
+- 选中完整段落，只翻译该段，不附带章节标题、前一段或下一段。
+- keyTerm 只能来自用户实际选区，不能来自 context 中未选中的术语。
+- 单词分析仍可利用上下文消歧。
+- 中文选区仍静默。
+- 自动翻译开关仍有效。
+- 多词标题仍进入 sentenceTranslation。
+- 生词本与设置仍正常。
+
+12. 当前 Git 状态与历史改动边界
+
+本轮没有执行 git add、git commit、git push。
+
+本轮直接相关修改：
+- sentence-translation-skill.js
+- gateway/app/skills/sentence_translation.py
+- gateway/contracts/fixtures/sentence-success.json
+- tests/stage13-sentence-translation.test.js
+- tests/gateway-provider.test.js
+- gateway/tests/test_gateway_contract.py
+- README.md
+- 本报告文件
+
+当前工作区仍包含此前多轮未提交改动：
+- PRIVACY.md
+- content.js
+- gateway-language-provider.js
+- gateway/README.txt
+- manifest.json
+- popup.css / popup.html / popup.js
+- tests/stage10-floating-panel-interaction.test.js
+- tests/stage18_2-sentence-boundary-heuristic.test.js
+- tests/auto-translate-toggle-and-han-filter.test.js
+- plan_log/
+- 多份 report_log 历史报告
+- Translator_Plugin_Releases/
+- Translator_Plugin_WPS_Addin/
+- tools/
+
+这些历史改动未被清理、回滚或归并。
+
+13. 未完成项和风险
+
+未完成项：
+- 未部署 Cloud Run，远程 Gateway Beta 尚不会使用新的 Python Prompt。
+- 未重新加载 Chrome 扩展，未做本地 GUI 验收。
+- 未重新打包朋友测试包。
+- 未 commit/push。
+
+风险：
+- Prompt 约束不能用静态测试 100% 保证真实 Gemini 永远服从，但已把目标/上下文职责写入 Gateway 与本地 Skill，并用测试锁住。
+- contextSentence 仍可能很长或包含相邻内容；本轮不重写上下文提取算法，只保证它不能扩大输出目标。
+- 如果用户继续使用未部署的 Cloud Run 服务，Gateway Beta 行为仍是旧 Prompt。
+
+14. 给 ChatGPT 的快速上下文
+
+本轮修复 sentenceTranslation 的目标/上下文职责分离。
+前端字段没有混用：payload.text 是用户选区，payload.contextSentence 是上下文。
+真正问题是 Prompt 没有明确禁止模型翻译 context。
+本轮保留协议不变，升级 Sentence Skill 到 sentence-translation-v1.1。
+JS Skill 和 Gateway Python Skill 都新增规则：translation 只能对应 targetText，contextSentence 只能辅助术语消歧、指代消解、省略理解、风格判断和背景理解，不能输出 targetText 外的独立内容。
+keyTerm.term 必须来自 targetText，meaning 可以参考 context。
+Gemini/DeepSeek Provider 包装器未改，因为它们已完整继承 Skill instructions；测试已验证继承。
+Word Analysis 未改。
+自动测试通过，但 Cloud Run 尚未部署，Chrome GUI 尚未验收。

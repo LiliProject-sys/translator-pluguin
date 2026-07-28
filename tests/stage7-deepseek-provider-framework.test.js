@@ -279,7 +279,7 @@ function testStaticIntegration() {
   const options = fs.readFileSync(path.join(projectRoot, "options.js"), "utf8");
   const provider = fs.readFileSync(path.join(projectRoot, "translation-provider.js"), "utf8");
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "1.0.1");
+  assert.equal(manifest.version, "1.0.2");
   assert(manifest.host_permissions.includes("https://api.deepseek.com/*"));
   assert(background.includes('"deepseek-context-provider.js"'));
   assert(background.includes("deepSeekContextProvider.reset"));

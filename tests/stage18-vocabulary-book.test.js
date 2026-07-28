@@ -258,7 +258,7 @@ function testStaticStage18Boundaries() {
   const gemini = fs.readFileSync(path.join(projectRoot, "gemini-context-provider.js"), "utf8");
   const deepseek = fs.readFileSync(path.join(projectRoot, "deepseek-context-provider.js"), "utf8");
 
-  assert.equal(manifest.version, "1.0.1");
+  assert.equal(manifest.version, "1.0.2");
   assert(content.includes("maybeStoreQuickAnalysisOnSnapshot"));
   assert(content.includes('currentSelectionRequestType !== "wordAnalysis"'));
   assert(content.includes("quickRequestId !== currentQuickRequestId"));

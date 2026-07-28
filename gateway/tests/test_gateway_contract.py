@@ -14,6 +14,7 @@ from gateway.app.auth import extract_bearer_token, verify_token_value
 from gateway.app.config import MAX_REQUEST_BODY_BYTES, settings
 from gateway.app.main import create_app
 from gateway.app.schemas import LanguageRequest
+from gateway.app.skills import sentence_translation
 
 
 FIXTURE_DIR = PROJECT_ROOT / "gateway" / "contracts" / "fixtures"
@@ -153,6 +154,48 @@ class GatewayContractTests(unittest.TestCase):
             self.assertEqual(payload["data"]["provider"], "gateway")
             self.assertEqual(payload["data"]["upstreamProvider"], "gemini")
             self.assertNotIn("cached", payload["data"])
+
+    def test_sentence_translation_prompt_separates_target_and_context(self):
+        payload = LanguageRequest.model_validate({
+            "requestId": "selection-sentence-001",
+            "requestType": "sentenceTranslation",
+            "analysisMode": "quick",
+            "sourceLanguage": "en",
+            "targetLanguage": "zh-CN",
+            "text": "Definition of LLM Agent",
+            "contextSentence": "2.1 Definition of LLM Agent\nLLM technology continues to advance and enables autonomous behaviour.",
+            "pageTitle": "Survey",
+        })
+        prompt = sentence_translation.build_prompt(payload)
+        system = prompt["system"]
+        user = prompt["user"]
+
+        self.assertEqual(sentence_translation.SKILL_VERSION, "sentence-translation-v1.1")
+        self.assertEqual(user["targetText"], "Definition of LLM Agent")
+        self.assertEqual(user["contextSentence"], "2.1 Definition of LLM Agent\nLLM technology continues to advance and enables autonomous behaviour.")
+        self.assertIn("targetText is the only TARGET TEXT", system)
+        self.assertIn("contextSentence is CONTEXT ONLY", system)
+        self.assertIn("translation field must correspond only to targetText", system)
+        self.assertIn("Do not translate, restate, summarize, or output", system)
+        self.assertIn("title, numbering, previous sentence, following sentence", system)
+        self.assertIn("keyTerm.term must come from targetText", system)
+
+    def test_sentence_translation_prompt_allows_context_for_resolution_only(self):
+        payload = LanguageRequest.model_validate({
+            "requestId": "selection-pronoun-001",
+            "requestType": "sentenceTranslation",
+            "analysisMode": "quick",
+            "text": "These agents exhibit remarkable capabilities.",
+            "contextSentence": "An LLM agent is an artificial intelligence system that uses a large language model.",
+        })
+        prompt = sentence_translation.build_prompt(payload)
+        system = prompt["system"]
+
+        self.assertEqual(prompt["user"]["targetText"], "These agents exhibit remarkable capabilities.")
+        self.assertEqual(prompt["user"]["contextSentence"], "An LLM agent is an artificial intelligence system that uses a large language model.")
+        self.assertIn("pronoun resolution", system)
+        self.assertIn("ellipsis recovery", system)
+        self.assertIn("must not add independent content outside targetText", system)
 
 
 if __name__ == "__main__":

@@ -105,7 +105,7 @@ function testCompatibilityInvariants() {
   assert(background.includes('const STORAGE_KEY = "vocabularyEntries"'));
   assert(background.includes('type === "CHECK_VOCABULARY_STATUS"'));
   assert(background.includes('type !== "SAVE_VOCABULARY_ENTRY"'));
-  assert.equal(manifest.version, "1.0.1");
+  assert.equal(manifest.version, "1.0.2");
   assert.equal(manifest.manifest_version, 3);
 }
 

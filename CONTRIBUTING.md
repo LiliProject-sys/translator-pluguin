@@ -1,6 +1,6 @@
 # Contributing
 
-Translator-plugin is intentionally built with native Chrome Extension APIs, HTML, CSS, and JavaScript.
+Orange翻译 is intentionally built with native Chrome Extension APIs, HTML, CSS, and JavaScript.
 
 ## Development Rules
 

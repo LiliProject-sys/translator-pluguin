@@ -9,7 +9,7 @@ const framework = fs.readFileSync(path.join(projectRoot, "translation-provider.j
 const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "1.0.1");
+assert.equal(manifest.version, "1.0.2");
 
 assert.equal(content.includes('window.addEventListener("scroll", closeSelectionPanel'), false);
 assert.equal(content.includes('addEventListener("scroll"'), false);
@@ -33,7 +33,7 @@ assert(content.includes("let currentSelectionId = 0;"));
 assert(content.includes("let detailAnalysisRequestId = 0;"));
 assert(content.includes("selectionId !== currentSelectionId"));
 assert(content.includes("analysisRequestId !== detailAnalysisRequestId"));
-assert(content.includes("cancelLanguageRequests(getCurrentLanguageRequestIds())"));
+assert(content.includes("closeSelectionPanel();"));
 assert(content.includes('type: "CANCEL_LANGUAGE_REQUEST"'));
 assert(content.includes("currentQuickRequestId = `selection-${selectionId}-quick`"));
 assert(content.includes("currentDetailRequestId = `selection-${selectionId}-detail-${analysisRequestId}`"));

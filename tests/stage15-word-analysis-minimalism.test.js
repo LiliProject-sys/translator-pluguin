@@ -227,7 +227,7 @@ function testUiAndCompatibility() {
   const content = fs.readFileSync(path.join(projectRoot, "content.js"), "utf8");
   const background = fs.readFileSync(path.join(projectRoot, "background.js"), "utf8");
   const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "1.0.1");
+  assert.equal(manifest.version, "1.0.2");
   assert(content.includes("analysis.meaningInSentence"));
   assert(content.includes("formatComparisonDisplay"));
   assert.equal(content.includes("analysis.contextualMeaning"), false);

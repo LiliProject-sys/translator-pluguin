@@ -1,5 +1,5 @@
 (function initializeGatewayLanguageProvider(globalScope) {
-  const GATEWAY_BASE_URL = "http://127.0.0.1:8000";
+  const GATEWAY_BASE_URL = "https://translator-gateway-beta-268073468344.asia-northeast1.run.app";
   const TRANSLATION_SETTINGS_KEY = "translationSettings";
   const REQUEST_TIMEOUT_MS = 30000;
   const MAX_PAGE_TITLE_LENGTH = 300;

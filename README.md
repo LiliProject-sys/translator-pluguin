@@ -1,4 +1,4 @@
-# Translator-plugin
+# Orange翻译
 
 ## GitHub 私有 Beta 分发说明
 
@@ -20,17 +20,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-extension.ps1
 
 脚本会在 `release/` 目录生成用于 Chromium/Chrome 加载测试的 ZIP。生成的 ZIP、用户本地配置、个人词库导出和私密记录默认不会提交到 Git。
 
-Translator-plugin 是一个无需构建步骤的 Chrome Manifest V3 扩展。用户在普通网页中选中英文单词或短语后，浮窗会立即显示本地收录状态，并异步执行所选语言处理模式：百度快速翻译、DeepSeek/Gemini AI 两层语境解析或本地 Mock。词条仍保存到 `chrome.storage.local`。
+Orange翻译 是一个无需构建步骤的 Chrome Manifest V3 扩展。用户在普通网页中选中英文单词或短语后，浮窗会立即显示本地收录状态，并异步执行所选语言处理模式：百度快速翻译、DeepSeek/Gemini AI 两层语境解析或本地 Mock。词条仍保存到 `chrome.storage.local`。
 
 ## 项目状态
 
-当前版本：`v1.0.1`。
+当前版本：`v1.0.2`。
 
-Translator Plugin Chrome 版核心功能已基本完善，达到可供真实用户日常使用和收集反馈的稳定版本。这个版本不表示零 Bug 或支持所有网页，而是表示划词理解、生词保存、独立生词本、Provider 配置和论文阅读常见边界修复已经形成完整闭环。
+Orange翻译 Chrome 版核心功能已基本完善，达到可供真实用户日常使用和收集反馈的稳定版本。这个版本不表示零 Bug 或支持所有网页，而是表示划词理解、生词保存、独立生词本、Provider 配置和论文阅读常见边界修复已经形成完整闭环。
 
 ## 当前阶段
 
-- Gateway Beta：新增本地 FastAPI Gateway 接入。普通用户可在设置页输入共享 Beta 测试访问码，插件验证成功后切换到 `provider: "gateway"`，并通过本地 `http://127.0.0.1:8000` 转发 Word Analysis 与 Sentence Translation。当前仍是本地 Beta 与 Cloud Run 准备阶段，不升级正式版本号。
+- Gateway Beta：新增 Cloud Run Gateway 接入。普通用户可在设置页输入共享 Beta 测试访问码，插件验证成功后切换到 `provider: "gateway"`，并通过 Google Cloud Run Gateway 转发 Word Analysis 与 Sentence Translation。当前仍是小范围 Beta，不升级正式版本号。
 - Stage1：本地生词本、右键保存、popup 查看/删除/打开来源。
 - Stage2：划词后自动显示轻量收藏浮窗。
 - Stage3：区分未收录、单词已收录和当前语境已保存。
@@ -51,8 +51,9 @@ Translator Plugin Chrome 版核心功能已基本完善，达到可供真实用�
 - Stage18.1：增强语境回忆，在生词本安全高亮原句中的查询词，并为原句异步补写一次性中文译文。
 - Stage18.2：修复句子边界启发式，避免把小数点和高频学术缩写中的句点误判为句末。
 - v1.0.1：修复保存词条后浮窗自动关闭的问题；保存成功后浮窗保持显示，保存失败后按钮恢复可点击以便重试。
+- v1.0.2：将面向用户显示的插件名称统一为 `Orange翻译`，并接入 16、32、128 尺寸的扩展图标。
 
-当前插件版本为 `1.0.1`。
+当前插件版本为 `1.0.2`。
 
 ## 文件结构
 
@@ -87,7 +88,7 @@ Translator Plugin Chrome 版核心功能已基本完善，达到可供真实用�
 3. 首次安装时点击“加载已解压的扩展程序”。
 4. 选择 `D:\Project_Experimental\Translator_Plugin`。
 5. 已安装旧版本时点击扩展卡片上的“重新加载”。
-6. 确认版本显示为 `1.0.1`。
+6. 确认版本显示为 `1.0.2`，扩展名称显示为 `Orange翻译`。
 
 项目不需要 `npm install`，不包含 React、Vue、TypeScript 或后端服务。
 
@@ -165,7 +166,7 @@ Skill v6 的定位是“最小有效阅读支点”，只服务 Word Analysis，
 - `meaningInSentence`：简洁说明该词在当前句子里具体表示什么。
 - `comparison`：只有存在明显近义词语义区别时，返回 `{ word, difference }`；否则为 `null`。
 
-两层 Schema 都禁止额外字段。快速层所有字段必须是非空字符串；详细层的 `meaningInSentence` 必须非空，`comparison` 必须是严格的两字段对象或 `null`。词性根据当前句子的实际功能判断，例如 `reinforcing effect` 中应判断为 `adj.`。指令明确强调：AI 不替用户完成理解，只提供理解支点；`comparison` 是语义区别，不是原因分析。禁止 Markdown、作者心理分析、论文背景扩展、长篇总结、同义词列表和写作建议。
+两层 Schema 都禁止额外字段。快速层所有字段必须是非空字符串；详细层的 `meaningInSentence` 必须非空，`comparison` 必须是严格的两字段对象或 `null`。词性根据当前句子的实际功能判断。指令明确强调：AI 不替用户完成理解，只提供理解支点；`comparison` 是语义区别，不是原因分析。禁止 Markdown、作者心理分析、论文背景扩展、长篇总结、同义词列表和写作建议。
 
 Stage15 继续沿用 Stage14 删除 `academicMeaning` 和 `wordChoiceReason` 的方向，并删除 `comparison.contextReason`。`comparison.difference` 只说明两个词的核心语义区别，例如 `employ` 强调把技术、工具作为手段使用，`apply` 强调把方法作用于具体对象；`reinforcing` 强调增强已有结构或性能，`strengthening` 强调整体上使某物变得更强。
 
@@ -424,10 +425,10 @@ Stage9 已实现两层语境解析，但仍保持运行时展示，不写入生�
 
 Stage13 在原有 Word Analysis 外新增独立的 Sentence Translation。它面向“先快速读懂整体，再回头学习词汇”的论文阅读流程，不会替代单词的科研语境分析。
 
-- Word Analysis：单词、短语或短文本继续显示原形、音标、词性和常见含义，并可按需打开详细解释。
-- Sentence Translation：选中包含 `. ? ! ;` 的文本、超过 10 个词的文本或超过 80 个字符的文本时，浮窗显示自然中文译文，以及可选的一个关键技术术语说明。
+- Word Analysis：单个连续词项继续显示原形、音标、词性和常见含义，并可按需打开详细解释。
+- Sentence Translation：选中包含内部空白的短语、固定搭配、标题、句子或段落时，浮窗显示自然中文译文，以及可选的一个关键技术术语说明。
 
-Gemini 和 DeepSeek 共同使用 `sentence-translation-skill.js` 中的 `sentence-translation-v1`。这个 Skill 只要求自然翻译、专业术语和逻辑关系的准确保留；不输出音标、词性、`comparison`、近义词解释或详细词汇分析。返回结构为：
+Gemini 和 DeepSeek 共同使用 `sentence-translation-skill.js` 中的 `sentence-translation-v1.1`。这个 Skill 只要求自然翻译、专业术语和逻辑关系的准确保留；不输出音标、词性、`comparison`、近义词解释或详细词汇分析。返回结构为：
 
 ```js
 {
@@ -438,11 +439,13 @@ Gemini 和 DeepSeek 共同使用 `sentence-translation-skill.js` 中的 `sentenc
 
 `keyTerm` 不是关键词列表，默认是 `null`；仅在一个专业术语明显影响理解时才出现。AI 句段翻译返回 `resultType: "sentenceTranslation"`，而百度和 Mock 即使翻译句子或段落也继续返回 `resultType: "quickTranslation"`。所有译文和术语解释仍只存在于当前浮窗或内存缓存中，不写入 `vocabularyEntries`。
 
+Stage13 的翻译目标与上下文已经明确分离：`text / targetText` 是用户实际选中的唯一翻译目标，`contextSentence` 只用于术语消歧、指代消解、省略内容理解、风格判断和背景理解。译文不得包含 `contextSentence` 中超出选区的标题编号、前后句、相邻段落或正文；`keyTerm.term` 也必须来自用户实际选区，但释义可以参考上下文判断。Gateway Beta 路径如果更新了 `gateway/app/skills/sentence_translation.py`，需要重新部署 Cloud Run 后远程用户才会使用新 Prompt；本地 Gemini/DeepSeek 路径则在重新加载扩展后生效。
+
 ## 安全说明
 
 - Gateway Beta Token 只通过 `Authorization: Bearer <Token>` 发送，不放入业务 JSON body。真实 Token、Gemini API Key 和 `gateway/.env` 不应提交到 Git。
 - Gateway 语言请求只发送白名单字段：`requestId`、`requestType`、`analysisMode`、`sourceLanguage`、`targetLanguage`、`text`、`contextSentence` 和可选 `pageTitle`。不发送 `pageUrl`、整页正文、`userQuestion`、Prompt、模型名、Provider 偏好或本地 API Key。
-- Gateway Beta 当前固定本地地址 `http://127.0.0.1:8000`，普通用户设置页不显示也不编辑 Gateway URL。Cloud Run 部署成功并完成远程 Beta 前，不将 manifest 版本升级到 `1.1.0`。
+- Gateway Beta 当前固定 Cloud Run 地址 `https://translator-gateway-beta-268073468344.asia-northeast1.run.app`，普通用户设置页不显示也不编辑 Gateway URL。普通用户不需要自带 Gemini API Key；Gateway 服务端使用 Secret Manager 中的 Gemini API Key 调用 Gemini。远程 Beta 完成人工验收前，不将 manifest 版本升级到 `1.1.0`。
 - 百度密钥、DeepSeek API Key 和 Gemini API Key 不硬编码在源码中，也不会发送给 content script。
 - Service Worker 控制台只记录 Provider、HTTP 状态、内部错误码、requestId 及经过脱敏和截断的 API 错误信息；不记录凭据、请求头、选词、完整上下文、请求体或完整服务响应。
 - `chrome.storage.local` 不是加密保险箱。本实现适合个人本机 Demo，不适合共享电脑或把统一密钥打包公开发布。
@@ -510,7 +513,7 @@ Gemini 和 DeepSeek 共同使用 `sentence-translation-skill.js` 中的 `sentenc
 - 验证 `employ` 有 comparison 时，“当前语境”和“近义词区别”之间有浅灰细分割线。
 - 验证 `reinforcing` 不强制生成 comparison；若生成，只能是 reinforcing/strengthening 的核心语义区别。
 - 验证 `reinforcing` 无 comparison 时，不显示空的近义词区域或多余分割线。
-- 验证 `reinforcing effect` 的词性为 `adj.`，且没有明确替代关系时 `comparison` 为 `null`。
+- 验证 `reinforcing` 等单个连续词项可进入 Word Analysis，且没有明确替代关系时 `comparison` 为 `null`。
 - 验证 `electrochemical` 不会被强制生成近义词比较。
 - 验证 `reinforcing` 显示类似 `reinforce (reinforcing)`，不展示冗余词形变化长解释。
 - 确认 `partOfSpeech` 只显示约定的六种缩写之一。
@@ -522,8 +525,8 @@ Gemini 和 DeepSeek 共同使用 `sentence-translation-skill.js` 中的 `sentenc
 - 重复选择相同文本和上下文，确认当前 service worker 会话可命中缓存。
 - 回归三种收录状态、完全重复去重和多语境保存。
 - 回归右键保存、popup 排序/删除/打开来源和升级前旧词条。
-- 选中 `reinforcing` 和 `reinforcing effect`，确认仍进入 Word Analysis。
-- 选中一条完整英文句子或超过 10 个词的段落，确认 Gemini/DeepSeek 显示中文句段译文，不显示音标、词性、comparison 或“详细解释”。
+- 选中 `reinforcing`，确认仍进入 Word Analysis；选中 `reinforcing effect`、`machine learning` 或英文短标题，确认进入整体翻译。
+- 选中一条完整英文句子或 Abstract 段落，确认 Gemini/DeepSeek 显示中文句段译文，不显示音标、词性、comparison 或“详细解释”。
 - 在句段中包含阻碍理解的专业术语时，确认最多显示一个“关键术语”；普通文本不应生成词汇列表。
 - 切换百度或 Mock 后选中句子，确认仍显示快速译文，且不把它显示为 AI 关键术语结果。
 

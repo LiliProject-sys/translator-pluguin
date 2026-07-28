@@ -12,7 +12,7 @@ const deepseek = fs.readFileSync(path.join(projectRoot, "deepseek-context-provid
 const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
 function testManifestUnchanged() {
-  assert.equal(manifest.version, "1.0.1");
+  assert.equal(manifest.version, "1.0.2");
   assert.equal(manifest.manifest_version, 3);
 }
 

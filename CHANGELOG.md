@@ -3,7 +3,12 @@
 ## Unreleased
 
 - Add local Gateway Beta scaffolding for FastAPI, fixed Gemini forwarding, plugin GatewayProvider, shared contract fixtures, and local-only onboarding.
-- Keep manifest version at `1.0.1`; the target `1.1.0` version is deferred until future Cloud Run deployment and remote Beta validation.
+- Keep Gateway Beta below the target `1.1.0` version until future Cloud Run deployment and remote Beta validation.
+
+## 1.0.2 - Brand Refresh
+
+- Rename the user-facing extension brand to `Orange翻译`.
+- Add Chrome extension icon references for 16, 32, and 128 pixel PNG assets.
 
 ## 1.0.1 - Private Beta Candidate
 

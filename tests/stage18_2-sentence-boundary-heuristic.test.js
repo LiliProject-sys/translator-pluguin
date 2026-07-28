@@ -51,6 +51,14 @@ function createContentContext() {
         onMessage: { addListener() {} },
         sendMessage() {},
         lastError: null
+      },
+      storage: {
+        local: {
+          get(defaults, callback) {
+            callback(defaults);
+          }
+        },
+        onChanged: { addListener() {} }
       }
     },
     ResizeObserver: function ResizeObserver() {
@@ -149,7 +157,7 @@ function testStaticStage18_2Boundaries() {
   const background = fs.readFileSync(path.join(projectRoot, "background.js"), "utf8");
   const vocabulary = fs.readFileSync(path.join(projectRoot, "vocabulary.js"), "utf8");
 
-  assert.equal(manifest.version, "1.0.1");
+  assert.equal(manifest.version, "1.0.2");
   assert(content.includes("function isSentenceBoundary"));
   assert(content.includes("function isDecimalPoint"));
   assert(content.includes("function isProtectedAbbreviationPeriod"));

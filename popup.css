@@ -50,8 +50,56 @@ button:hover {
   background: #f1f5f9;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .settings-button {
   flex: 0 0 auto;
+}
+
+.auto-translate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.auto-translate-label {
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.auto-translate-switch {
+  min-width: 56px;
+  border-color: #94a3b8;
+  font-weight: 700;
+}
+
+.auto-translate-switch[aria-checked="true"] {
+  border-color: #2563eb;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.auto-translate-switch[aria-checked="false"] {
+  color: #475569;
+  background: #f8fafc;
+}
+
+.popup-status {
+  min-height: 18px;
+  margin: 0 0 8px;
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .open-vocabulary-button {

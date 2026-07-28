@@ -249,7 +249,7 @@ function testVocabularyShapeAndSourceInvariants() {
   assert.equal(providerSource.includes("generationConfig"), false);
   assert.equal(providerSource.includes("candidates"), false);
   assert(background.includes("safeError.diagnostics"));
-  assert.equal(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8").includes('"version": "1.0.1"'), true);
+  assert.equal(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8").includes('"version": "1.0.2"'), true);
   assert.equal(fs.readFileSync(path.join(projectRoot, "options.js"), "utf8").includes('"gemini-3.5-flash"'), true);
 }
 

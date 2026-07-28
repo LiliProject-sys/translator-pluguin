@@ -1,0 +1,349 @@
+﻿Translator-plugin 划词自动翻译开关与中文过滤整体变更报告
+生成时间：2026-07-27 11:45:00
+
+1. 本轮基本信息
+
+项目：Translator-plugin
+项目路径：D:\Project_Experimental\Translator_Plugin
+当前分支：feat/gateway-beta
+当前 HEAD：06804a22d02ffe62fd714aaae1d50ff01ababb14
+任务性质：代码整体变更报告，基于实际 diff 与实际代码状态生成
+本轮功能代码状态：已经真实实现划词自动翻译开关与中文选区静默过滤
+本报告动作：只生成本 TXT 报告
+本报告动作未执行：git add、git commit、git push、重新打包、Cloud Run 部署、功能代码修改
+
+需要特别区分：
+当前工作区还有此前已经存在的 Cloud Run / Gateway / README / manifest / release / report 等未提交改动。
+这些历史改动不属于“划词自动翻译开关与中文过滤”本轮功能成果。
+
+2. 修改前的行为
+
+修改前，只要用户在普通网页中划选文本，content.js 的 document mouseup 监听会延迟调用 showPanelForCurrentSelection()。
+如果选区非空并且可取得 Range，代码会立即创建 currentSelectionSnapshot、创建浮窗、发送 CHECK_VOCABULARY_STATUS 和 TRANSLATE_TEXT。
+这意味着：
+- 用户只是复制、搜索、临时选择文本，也会触发翻译；
+- 中文网页或中英混合选区也会触发翻译；
+- 用户无法在 popup 中临时关闭自动划词翻译；
+- 如果新页面刚加载时设置还没读取完成，旧选区等待任务缺少请求发出前的 intent 保护。
+
+3. 修改后的行为
+
+Popup 现在有“划词自动翻译”开关。
+默认开启，用户可以关闭；关闭后，网页划词不会自动弹出浮窗，也不会自动请求 Cloud Run。
+开关状态保存在 chrome.storage.local 的 autoTranslateEnabled 中，重启浏览器或重新打开 popup 后仍保持。
+
+content.js 现在会在发送任何自动翻译请求之前检查：
+- autoTranslateEnabled 是否开启；
+- selectedText 是否包含汉字。
+
+如果开关关闭，或 selectedText 中包含汉字：
+- 静默结束；
+- 不创建翻译浮窗；
+- 不发送 CHECK_VOCABULARY_STATUS；
+- 不发送 TRANSLATE_TEXT；
+- 不触达 Cloud Run；
+- 不显示“检测到中文”等提示。
+
+只检查 selectedText，不检查 contextSentence。
+因此，如果用户只选中纯英文单词，但周围上下文有中文注释，仍允许翻译。
+
+4. 实际修改文件和关键函数
+
+本轮自动翻译开关与中文过滤相关文件：
+- content.js
+- popup.html
+- popup.css
+- popup.js
+- tests/auto-translate-toggle-and-han-filter.test.js
+- tests/stage10-floating-panel-interaction.test.js
+- tests/stage18_2-sentence-boundary-heuristic.test.js
+
+content.js 关键实现：
+- 新增 AUTO_TRANSLATE_KEY = "autoTranslateEnabled"
+- 新增 HAN_PATTERN = /\p{Script=Han}/u
+- 新增 selectionIntentId
+- 新增 autoTranslateEnabled、autoTranslateSettingsReady、autoTranslateSettingsPromise
+- 新增 chrome.storage.onChanged.addListener
+- showPanelForCurrentSelection() 改为 async，并在创建 snapshot、浮窗和请求前等待设置初始化
+- 新增 loadAutoTranslateSettings()
+- 新增 getAutoTranslateEnabledFromStorageValue()
+- 新增 containsHanScript()
+
+content.js 关键位置：
+- 顶层常量与状态：content.js:9-27
+- 浮窗内部 mouseup early-return 保留：content.js:74-85
+- storage listener：content.js:107-119
+- async showPanelForCurrentSelection：content.js:121-160
+- 设置初始化：content.js:163-179
+- 默认值处理：content.js:181-183
+- 汉字检测：content.js:185-187
+- 模式判断函数 detectSelectionRequestType：content.js:742-751
+
+Popup 关键实现：
+- popup.html:19-29 新增 auto-translate-row 区域
+- button id：autoTranslateToggle
+- class：auto-translate-switch
+- role：switch
+- aria-checked：true / false
+- 文案：开启 / 关闭
+- 状态提示：autoTranslateStatus
+
+popup.js 关键实现：
+- AUTO_TRANSLATE_KEY = "autoTranslateEnabled"
+- renderAutoTranslateSetting() 使用 chrome.storage.local.get({ autoTranslateEnabled: true }) 初始化
+- toggleAutoTranslate() 使用 previousValue / nextValue
+- 写入 storage 时临时禁用按钮
+- chrome.storage.local.set 失败时恢复 previousValue、恢复 aria-checked 和文案、显示“保存失败，请重试”
+- getAutoTranslateEnabledFromStorageValue(value) 在 value === undefined 时返回 true
+
+popup.css 关键实现：
+- 新增 auto-translate-row 布局
+- 新增 auto-translate-label
+- 新增 auto-translate-switch
+- 使用 aria-checked=true/false 控制开关视觉
+- 新增 popup-status 错误提示
+- button:disabled 用于写入期间防止连续点击
+
+5. 接口、Storage 与数据变化
+
+新增 storage key：autoTranslateEnabled
+存储位置：chrome.storage.local
+默认值：true
+
+Popup 使用方式：
+- 打开 popup 时 get 初始化；
+- 用户点击开关时 set 写入；
+- 写入失败时回滚 UI；
+- popup 局部变量不是唯一真实状态，storage 才是跨页面共享状态。
+
+content.js 使用方式：
+- 页面加载后执行 loadAutoTranslateSettings()；
+- 划词处理时读取本页内存缓存，不会每次划词都重新 storage.get；
+- storage.onChanged 监听 autoTranslateEnabled；
+- 多个已打开网页无需刷新即可同步；
+- key 被删除时按默认开启处理。
+
+本轮没有修改：
+- vocabularyEntries
+- translationSettings
+- vocabularySortMode
+- vocabularyRandomOrder
+- Gateway 请求/响应 Schema
+- Provider 接口
+- Skill 输出结构
+- manifest 版本
+- Cloud Run URL
+
+6. selectionIntentId 与旧请求处理
+
+selectionIntentId 是本轮新增的请求发出前保护机制。
+它的职责是防止以下竞态：
+页面刚加载，storage.get 还没完成，用户先选英文 A，又马上选英文 B。A 和 B 都等待同一个 settings Promise 时，B 会递增 selectionIntentId；A 恢复后发现 intentId 已过期，直接 return，不创建浮窗、不发送 CHECK、不发送 TRANSLATE。
+
+currentSelectionId / quick requestId / detail requestId 仍负责请求发出后的生命周期。
+也就是说：
+- selectionIntentId：保护发送请求前、异步等待设置阶段；
+- currentSelectionId 和 requestId：保护已有 snapshot、已有浮窗、已有请求后的 stale response 丢弃。
+
+用户关闭开关时：
+- content.js storage listener 更新本页缓存；
+- selectionIntentId += 1；
+- closeSelectionPanel() 被调用；
+- closeSelectionPanel() 清空 snapshot 和 requestId；
+- 通过 cancelLanguageRequests() 发送 CANCEL_LANGUAGE_REQUEST；
+- 等待中的旧任务和已发出的旧请求都会失效。
+
+用户先划英文、再划中文时：
+- 新中文选区会生成新的 intent；
+- closeSelectionPanel() 使旧英文浮窗和请求失效；
+- 检查 containsHanScript(selectedText) 后静默结束；
+- 旧英文响应返回后会被现有 selectionId/requestId/snapshot 检查丢弃。
+
+浮窗内部交互保护：
+- document mouseup 仍先检查 isEventInsideSelectionPanel(event) 和 panelPointerDown；
+- 如果是浮窗内部点击、按钮、拖动、缩放等操作，直接 return；
+- 不会在这个 early-return 之前 closeSelectionPanel；
+- 不会递增 selectionIntentId；
+- 不会取消无关请求。
+
+7. 中文选区过滤
+
+汉字检测方式：
+- 使用现代 Chromium 支持的 /\p{Script=Han}/u；
+- 不引入第三方语言检测库；
+- 当前只面向现代 Chrome/Edge。
+
+过滤范围：
+- 只检查用户实际选中的 selectedText；
+- 不检查 contextSentence；
+- selectedText 只要包含汉字就跳过。
+
+实际效果：
+- 纯中文选区跳过；
+- 中英混合且含汉字选区跳过；
+- 纯英文选区正常进入原链路；
+- 含中文的上下文不会误拦截纯英文 selectedText。
+
+拦截位置：
+- 在 currentSelectionSnapshot = getSelectionContext() 之前；
+- 在 createOrUpdateSelectionPanel() 之前；
+- 在 checkCurrentSelectionStatus(selectionId) 之前；
+- 在 requestTranslation(selectionId) 之前。
+
+因此中文选区不会发送到 Cloud Run，也不会消耗 Gemini 请求额度。
+
+8. 自动测试与实际执行状态
+
+新增测试：
+- tests/auto-translate-toggle-and-han-filter.test.js
+
+该测试覆盖：
+- autoTranslateEnabled key；
+- Han 正则；
+- selectionIntentId；
+- storage listener；
+- mouseup 内部 early-return 不被破坏；
+- 中文过滤发生在 snapshot、CHECK、TRANSLATE 之前；
+- popup switch DOM、aria-checked、开启/关闭文案；
+- popup storage get/set；
+- popup set 失败回滚；
+- key 删除时默认 true。
+
+修改测试：
+- tests/stage10-floating-panel-interaction.test.js
+  更新断言，适配现在通过 closeSelectionPanel() 统一失效和取消请求。
+
+- tests/stage18_2-sentence-boundary-heuristic.test.js
+  为 VM 测试桩补充 chrome.storage.local.get 和 chrome.storage.onChanged.addListener mock，使 content.js 新增 storage 初始化可以在测试环境运行。
+
+已实际运行并通过的测试和检查：
+- node --check content.js
+- node --check popup.js
+- node --check tests/auto-translate-toggle-and-han-filter.test.js
+- node --check tests/stage10-floating-panel-interaction.test.js
+- node tests/auto-translate-toggle-and-han-filter.test.js
+- node tests/stage10-floating-panel-interaction.test.js
+- node tests/v1.0.1-floating-panel-persistence.test.js
+- node tests/stage11-floating-panel-resize.test.js
+- tests/ 目录下全部 *.test.js 已批量运行并通过
+- 递归 node --check 所有 JS 已通过
+- manifest.json JSON parse / MV3 / version 1.0.1 / storage 权限检查通过
+- git diff --check 通过
+
+本报告生成时未重新运行上述全量测试；以上为功能实现完成后的执行记录。
+
+9. 用户人工验收结果
+
+以下为用户在浏览器中的人工验收结果：
+
+已验证正常：
+1. 划选中文内容时不再翻译；
+2. 划选含中文的混合内容时不再触发翻译；
+3. Popup 已增加“划词自动翻译”开关；
+4. 关闭开关后自动翻译停止；
+5. 重新开启后自动翻译恢复；
+6. 生词本、设置等其他功能仍可用；
+7. 英文划词和句子翻译总体仍可工作。
+
+这些结果是用户人工验证，不是 Codex 在浏览器中完成的 GUI 验证。
+
+10. 新发现 Bug：部分句子误走单词模式
+
+状态：新发现、尚未修复的回归/边界问题。
+
+现象：
+划选有些完整英文句子或标题时，插件没有进入“句子翻译”模式，而是进入“单词/词组分析”模式，只选取其中一个词进行解释。
+但另一些英文句子或段落能正常进入句子翻译模式。
+
+异常例子：
+选区：A Roadmap of Agent Research and Development
+实际浮窗：按单词模式处理，单词显示为 roadmap，并给出音标、词性和“路线图；指导方针”。
+
+正常例子：
+选中论文 Abstract 的完整英文段落或句子时，实际浮窗按句子翻译模式处理，显示整段中文译文和关键词。
+
+当前代码证据：
+content.js 中模式判断函数是 detectSelectionRequestType(selectedText)，位置约 content.js:742-751。
+当前判断条件是：
+- 文本为空：wordAnalysis；
+- 包含 . ? ! ;：sentenceTranslation；
+- 单词数 > 10：sentenceTranslation；
+- 字符数 > 80：sentenceTranslation；
+- 其他：wordAnalysis。
+
+异常标题 A Roadmap of Agent Research and Development：
+- 无句号、问号、感叹号、分号；
+- 约 6 个词，不超过 10；
+- 字符数大概率不超过 80；
+因此根据当前启发式，初步推测会被判为 wordAnalysis。
+
+目前能确定：
+- 最可能涉及 content.js 的 detectSelectionRequestType()；
+- 标题或无句末标点的英文文本可能被当前启发式视作词组/短语；
+- 本轮新增的中文过滤发生在 detectSelectionRequestType 之前，但它只影响含汉字 selectedText；
+- 对纯英文标题，中文过滤不会触发；
+- 本轮新增的 closeSelectionPanel / snapshot 顺序理论上不应改变 wordAnalysis 与 sentenceTranslation 的阈值判断。
+
+目前不能确定：
+- 浏览器实际 selection.toString() 是否完整包含整个标题；
+- 是否页面 DOM / Range / selection 在某些标题上导致 selectedText 被截断；
+- Gateway 收到的 text 与 requestType 是否与 content.js 判断一致；
+- 是否还有其它函数在渲染时影响了显示词。
+
+下一轮建议：
+- 为 detectSelectionRequestType 增加专项测试，覆盖标题型文本；
+- 用真实 selectedText 日志或安全调试方式确认标题选择时的实际 selectedText、wordCount、text.length、requestType；
+- 讨论是否把英文标题型短文本也纳入 sentenceTranslation，例如首字母标题大小写模式、词数 >= 5 且无中文且非普通短语时判为句段翻译；
+- 修复前不要直接打包给朋友作为最终体验版本，至少应记录该边界问题。
+
+11. Git 状态
+
+当前分支：feat/gateway-beta
+当前 HEAD：06804a22d02ffe62fd714aaae1d50ff01ababb14
+本报告是否 commit：否
+本报告是否 push：否
+
+本轮自动翻译开关与中文过滤相关改动：
+- content.js
+- popup.html
+- popup.css
+- popup.js
+- tests/auto-translate-toggle-and-han-filter.test.js
+- tests/stage10-floating-panel-interaction.test.js
+- tests/stage18_2-sentence-boundary-heuristic.test.js
+
+此前已存在、与本轮无关的历史未提交改动包括：
+- PRIVACY.md
+- README.md
+- gateway-language-provider.js
+- gateway/README.txt
+- manifest.json
+- tests/gateway-provider.test.js
+- tools/
+- Translator_Plugin_Releases/
+- Translator_Plugin_WPS_Addin/
+- 多个 Gateway / Cloud Run 相关 report_log 文件
+
+本报告不包含 Gemini API Key、Beta Token、Secret Manager 内容或任何真实密钥。
+
+12. 未完成项与风险
+
+未完成项：
+- 新发现的“部分英文标题/句子误走单词模式”尚未修复；
+- 尚未重新生成朋友测试包；
+- 本报告生成时未重新执行 Chrome/Edge GUI 验收；
+- 尚未 Git add / commit / push；
+- 当前工作区未提交改动较多，后续需要谨慎分组。
+
+风险：
+- 如果直接打包给朋友，标题型英文选区可能仍出现误判；
+- 当前工作区混有历史 Gateway/Cloud Run 改动和本轮前端改动，提交前必须明确边界；
+- 不要把 release、WPS、report_log、私密记录或测试包误提交；
+- 不需要重新部署 Cloud Run，误部署会引入不必要风险。
+
+建议下一步：
+优先修复并测试“标题/短句误走单词模式”的判断逻辑；修复后再进行 Chrome/Edge 人工验收；验收通过后重新生成朋友测试包。暂不建议在该 Bug 未确认前直接打包发布。
+
+13. 给 ChatGPT 的快速上下文
+
+本轮功能代码已经实际实现：Popup 增加 autoTranslateEnabled 开关；content.js 在发送 CHECK_VOCABULARY_STATUS 和 TRANSLATE_TEXT 前读取本页缓存并过滤含汉字 selectedText；selectionIntentId 负责防止 storage 初始化等待期间旧选区继续发送请求；关闭开关会通过 storage.onChanged 同步多个标签页、关闭浮窗并取消旧请求。用户浏览器人工验收确认中文和中英混合选区不再翻译，开关关闭/开启有效，生词本和设置仍可用。新发现问题是部分无句末标点的英文标题或短句会被 detectSelectionRequestType 判为 wordAnalysis，例如 “A Roadmap of Agent Research and Development” 被按 roadmap 单词解释；该问题尚未修复，下一步应优先补复现测试并调整句子/标题模式判断。

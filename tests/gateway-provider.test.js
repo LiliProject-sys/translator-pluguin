@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
+const CLOUD_RUN_GATEWAY_BASE_URL = "https://translator-gateway-beta-268073468344.asia-northeast1.run.app";
 global.self = global;
 global.chrome = {
   runtime: { lastError: null },
@@ -48,6 +49,22 @@ const successEnvelope = Object.freeze({
   }
 });
 
+const sentenceSuccessEnvelope = Object.freeze({
+  status: "ok",
+  requestId: "selection-sentence-001",
+  data: {
+    provider: "gateway",
+    upstreamProvider: "gemini",
+    resultType: "sentenceTranslation",
+    skillVersion: "sentence-translation-v1.1",
+    translation: "大语言模型智能体的定义",
+    keyTerm: {
+      term: "LLM Agent",
+      meaning: "大语言模型智能体，可借助上下文理解为基于大语言模型的智能体。"
+    }
+  }
+});
+
 async function expectCode(factory, code) {
   await assert.rejects(factory, (error) => error && error.code === code);
 }
@@ -75,7 +92,7 @@ async function testLanguageRequestWhitelist() {
     pageUrl: "https://example.com"
   });
 
-  assert.equal(captured.url, "http://127.0.0.1:8000/v1/language");
+  assert.equal(captured.url, `${CLOUD_RUN_GATEWAY_BASE_URL}/v1/language`);
   assert.equal(captured.options.headers.Authorization, "Bearer valid-token");
   assert.equal(captured.body.text, "employed");
   assert.equal(captured.body.pageTitle.length, 300);
@@ -84,12 +101,51 @@ async function testLanguageRequestWhitelist() {
   assert.equal(Object.prototype.hasOwnProperty.call(captured.body, "pageUrl"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(captured.body, "providerPreference"), false);
   assert.equal(JSON.stringify(captured.body).includes("valid-token"), false);
-  assert.equal(JSON.stringify(captured.body).includes("127.0.0.1"), false);
+  assert.equal(JSON.stringify(captured.body).includes("translator-gateway-beta"), false);
   assert.equal(result.provider, "gateway");
   assert.equal(result.upstreamProvider, "gemini");
   assert.equal(result.requestId, "selection-example-001");
   assert.equal(result.cached, undefined);
   assert.equal(provider.getPendingRequestCount(), 0);
+}
+
+async function testSentenceTranslationKeepsTargetAndContextSeparate() {
+  let captured;
+  const selectedText = "Definition of LLM Agent";
+  const contextSentence = "2.1 Definition of LLM Agent\nLLM technology continues to advance and enables autonomous behaviour.";
+  const provider = gatewayLanguageProviderFactory.createGatewayLanguageProvider({
+    storageArea: createStorage(),
+    fetchImpl: async (url, options) => {
+      captured = { url, options, body: JSON.parse(options.body) };
+      return createResponse(200, sentenceSuccessEnvelope);
+    }
+  });
+
+  const result = await provider.process({
+    text: selectedText,
+    contextSentence,
+    pageTitle: "Survey",
+    sourceLanguage: "en",
+    targetLanguage: "zh-CN",
+    requestType: "sentenceTranslation",
+    analysisMode: "quick",
+    requestId: "selection-sentence-001",
+    pageUrl: "https://example.com/paper",
+    userQuestion: "must not be sent"
+  });
+
+  assert.equal(captured.url, `${CLOUD_RUN_GATEWAY_BASE_URL}/v1/language`);
+  assert.equal(captured.body.text, selectedText);
+  assert.equal(captured.body.contextSentence, contextSentence);
+  assert.equal(captured.body.requestType, "sentenceTranslation");
+  assert.equal(captured.body.analysisMode, "quick");
+  assert.equal(captured.body.text.includes("LLM technology continues to advance"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(captured.body, "userQuestion"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(captured.body, "pageUrl"), false);
+  assert.equal(result.resultType, "sentenceTranslation");
+  assert.equal(result.skillVersion, "sentence-translation-v1.1");
+  assert.equal(result.translation, "大语言模型智能体的定义");
+  assert.equal(result.keyTerm.term, "LLM Agent");
 }
 
 async function testRequestIdMismatchAndErrors() {
@@ -156,7 +212,7 @@ async function testVerifyAccessTokenContract() {
   });
   const result = await provider.verifyAccessToken("candidate-token");
   assert.deepEqual(result, { status: "ok", access: "granted" });
-  assert.equal(captured.url, "http://127.0.0.1:8000/v1/auth/verify");
+  assert.equal(captured.url, `${CLOUD_RUN_GATEWAY_BASE_URL}/v1/auth/verify`);
   assert.equal(captured.options.headers.Authorization, "Bearer candidate-token");
 }
 
@@ -211,10 +267,15 @@ function testStaticIntegration() {
   const background = fs.readFileSync(path.join(projectRoot, "background.js"), "utf8");
   const provider = fs.readFileSync(path.join(projectRoot, "gateway-language-provider.js"), "utf8");
   const options = fs.readFileSync(path.join(projectRoot, "options.js"), "utf8");
-  assert(manifest.host_permissions.includes("http://127.0.0.1:8000/*"));
+  assert(manifest.host_permissions.includes(`${CLOUD_RUN_GATEWAY_BASE_URL}/*`));
+  assert.equal(manifest.host_permissions.includes("http://127.0.0.1:8000/*"), false);
+  assert.equal(manifest.host_permissions.includes("http://localhost:8000/*"), false);
+  assert.equal(manifest.host_permissions.includes("https://*.run.app/*"), false);
   assert(background.includes('"gateway-language-provider.js"'));
   assert(background.includes("handleGatewayProviderTest"));
-  assert(provider.includes('const GATEWAY_BASE_URL = "http://127.0.0.1:8000";'));
+  assert(provider.includes(`const GATEWAY_BASE_URL = "${CLOUD_RUN_GATEWAY_BASE_URL}";`));
+  assert.equal(provider.includes("http://127.0.0.1:8000"), false);
+  assert.equal(provider.includes("localhost:8000"), false);
   assert.equal((provider.match(/GATEWAY_BASE_URL/g) || []).length >= 2, true);
   assert(options.includes('provider: "gateway"'));
   assert(options.includes("gatewayAccessToken"));
@@ -222,6 +283,7 @@ function testStaticIntegration() {
 
 (async () => {
   await testLanguageRequestWhitelist();
+  await testSentenceTranslationKeepsTargetAndContextSeparate();
   await testRequestIdMismatchAndErrors();
   await testAbortCleanupAndMapping();
   await testVerifyAccessTokenContract();
