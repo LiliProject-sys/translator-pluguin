@@ -1,4 +1,4 @@
-﻿const assert = require("assert");
+const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
@@ -258,7 +258,7 @@ function testStaticStage18Boundaries() {
   const gemini = fs.readFileSync(path.join(projectRoot, "gemini-context-provider.js"), "utf8");
   const deepseek = fs.readFileSync(path.join(projectRoot, "deepseek-context-provider.js"), "utf8");
 
-  assert.equal(manifest.version, "1.0.2");
+  assert.equal(manifest.version, "1.0.4");
   assert(content.includes("maybeStoreQuickAnalysisOnSnapshot"));
   assert(content.includes('currentSelectionRequestType !== "wordAnalysis"'));
   assert(content.includes("quickRequestId !== currentQuickRequestId"));

@@ -279,6 +279,9 @@ function testStaticIntegration() {
   assert.equal((provider.match(/GATEWAY_BASE_URL/g) || []).length >= 2, true);
   assert(options.includes('provider: "gateway"'));
   assert(options.includes("gatewayAccessToken"));
+  assert(options.includes("renderGatewayConnectionStatus(settings)"));
+  assert(options.includes("function showGatewayVerificationFailure(settings, fallbackMessage)"));
+  assert(options.includes("新访问码验证失败，原有连接仍可使用"));
 }
 
 (async () => {

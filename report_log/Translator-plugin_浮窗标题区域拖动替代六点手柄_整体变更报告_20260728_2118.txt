@@ -1,0 +1,224 @@
+Orange翻译 浮窗标题区域拖动替代六点手柄整体变更报告
+
+1. 本轮基本信息
+
+项目目录：D:\Project_Experimental\Translator_Plugin
+当前分支：feat/gateway-beta
+本轮目标：删除划词浮窗顶部六点拖动手柄，改为使用浮窗顶部原文标题区域直接拖动。
+本轮不涉及：Gateway、Cloud Run、Provider、Prompt、请求协议、response schema、Word Analysis、Sentence Translation、TARGET/CONTEXT、中文过滤、纯符号过滤、PDF、F9、生词本数据结构、API Key、Token、Popup 开关文案、设置页连接状态。
+
+2. 修改前六点手柄的 DOM 和样式
+
+修改前，content.js 在 createOrUpdateSelectionPanel() 中创建：
+button.translator-plugin-panel-drag-handle
+
+该按钮位于浮窗顶部、原文标题之前，使用 radial-gradient 绘制六点图案，并带有独立 width、height、margin、padding、cursor、touch-action、user-select 和 focus/hover 样式。它是独立拖动入口，但视觉上额外占用了一行顶部空间。
+
+3. 修改后的标题区域拖动行为
+
+修改后不再创建单独拖动按钮，也不再显示六点图标、拖动文字或额外占位行。
+
+浮窗顶部原文标题区域现在是拖动区域。用户把鼠标移入标题行时显示抓手光标，按住标题行即可拖动浮窗。标题文本仍保持原有单行截断、省略号、字号、颜色和粗细。
+
+4. 删除的旧 DOM、CSS、函数、状态和监听
+
+已删除：
+button.translator-plugin-panel-drag-handle 的 DOM 创建逻辑；
+六点 radial-gradient 图案 CSS；
+手柄 button 的尺寸、边距、边框、背景、focus 样式；
+handlePanelDragClick(event)；
+suppressNextPanelDragClick 状态；
+旧手柄 click 监听。
+
+删除原因：
+新的标题区域本身没有 click 业务动作，外层浮窗仍会阻止 click 冒泡到页面，因此旧手柄专属 click 抑制不再需要。保留它会成为无效状态和无效分支。
+
+5. 保留的拖动核心逻辑
+
+保留并复用：
+startPanelDrag(event)
+movePanelDrag(event)
+endPanelDrag(event)
+currentPanelViewportPosition
+hasUserPanelPosition
+isPanelDragging
+panelDragState
+clampPanelViewportPosition()
+keepSelectionPanelInViewport()
+Pointer Capture 生命周期
+当前页面内位置保持
+边界校正写回
+ResizeObserver
+stale response 防护
+
+拖动仍不发送 TRANSLATE_TEXT，不递增 currentSelectionId，不取消正在进行的语言请求。
+
+6. 标题区域真实 class / 选择器
+
+标题元素现在使用：
+.translator-plugin-panel-text.translator-plugin-panel-drag-region
+
+CSS 选择器：
+#translator-plugin-selection-panel .translator-plugin-panel-drag-region
+
+关键样式：
+cursor: grab;
+touch-action: none;
+user-select: none;
+
+拖动中样式：
+#translator-plugin-selection-panel .translator-plugin-panel-drag-region.is-dragging {
+  cursor: grabbing;
+}
+
+7. Pointer Events 绑定方式
+
+事件绑定从旧 button 切换到标题元素：
+textElement.addEventListener("pointerdown", startPanelDrag)
+
+pointerdown 后仍由 startPanelDrag() 记录 pointerId、起点坐标、浮窗起始 left/top，并调用 setPointerCapture(event.pointerId)。
+
+继续处理：
+pointermove
+pointerup
+pointercancel
+lostpointercapture
+
+pointerup、pointercancel、lostpointercapture 都会进入 endPanelDrag() 清理状态和事件监听。清理逻辑保持幂等，重复结束事件不会影响请求生命周期。
+
+8. 内容重建后的重新绑定方式
+
+当前外层 selectionPanel 复用，但 createOrUpdateSelectionPanel() 会通过 selectionPanel.innerHTML = "" 重建内部内容。每次重建时都会重新创建标题元素并绑定一次 pointerdown。
+
+由于事件绑定在新标题元素上，旧元素随 innerHTML 清除被移除，不会出现同一标题多次绑定导致一次拖动触发多次移动的问题。
+
+翻译中、成功结果、错误结果、Detail 展开和生词本状态变化不会重建整个 panel 外层，也不会清空 currentPanelViewportPosition。
+
+9. 是否保留 click 抑制及原因
+
+本轮删除了旧 click 抑制变量和 handlePanelDragClick()。
+
+原因：
+标题区域没有 click 业务动作；拖动结束后的 click 即使发生，也只会被浮窗外层 click 监听 stopPropagation，不会触发页面外部点击关闭，也不会触发翻译、保存、关闭或 Detail 行为。
+
+10. 正文选择、按钮和 resize 如何避免冲突
+
+只有标题区域绑定 pointerdown 启动拖动。
+
+以下区域不会启动拖动：
+翻译正文；
+关键词区域；
+Detail / 详细解释；
+加入生词本按钮；
+已保存状态按钮；
+关闭按钮；
+可滚动正文；
+原生 resize 区域；
+其它交互控件。
+
+正文区域没有 user-select: none，因此仍可选择和复制译文。浮窗根节点没有被整体设为拖动区域，也没有整体禁用选择。
+
+11. currentPanelViewportPosition 与位置保持是否变化
+
+位置保持逻辑没有改变。
+
+currentPanelViewportPosition 仍是唯一坐标来源。hasUserPanelPosition 仍表示当前坐标是否由用户拖动决定。用户拖动后，同一页面继续划词、关闭后再次划词、翻译返回、Detail 展开、ResizeObserver 校正后，都会继续使用 currentPanelViewportPosition。
+
+页面刷新、导航或标签页关闭后 content script 重新加载，坐标自然重置。
+
+12. manifest 版本修改前后
+
+修改前：1.0.3
+修改后：1.0.4
+
+只修改 manifest.json 的 version 字段。未修改 manifest_version、permissions、host_permissions、background、content_scripts、options_ui、action 或 Gateway 配置。
+
+13. 实际修改文件
+
+content.js
+manifest.json
+tests/stage10-floating-panel-interaction.test.js
+tests/stage11-floating-panel-resize.test.js
+tests/stage6 至 stage18.2 相关测试中的 manifest 版本断言
+
+注意：设置页连接状态、Popup 自动翻译文案与颜色是上一轮已有工作，本轮未继续修改这些功能代码。
+
+14. 自动测试命令与结果
+
+已执行：
+node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('manifest.json','utf8')); console.log('manifest-json-ok', m.version);"
+结果：通过，manifest-json-ok 1.0.4
+
+已执行：
+node --check content.js
+node --check tests/stage10-floating-panel-interaction.test.js
+node --check tests/stage11-floating-panel-resize.test.js
+结果：通过
+
+已执行：
+node tests/stage10-floating-panel-interaction.test.js
+node tests/stage11-floating-panel-resize.test.js
+结果：通过
+
+已执行：
+递归 node --check 项目 JS，排除 release、dist、WPS、缓存、虚拟环境等目录。
+结果：通过，js-syntax-ok 34
+
+已执行：
+tests/*.test.js 全量 Node 测试
+结果：通过，all-node-tests-ok 21
+
+已执行：
+git diff --check
+结果：通过。Git 仅提示 LF 将在下次 Git 处理时替换为 CRLF，未发现 whitespace error。
+
+15. 用户仍需完成的 GUI 验收
+
+尚未进行 Chrome/Edge 人工 GUI 验收。需要用户验证：
+
+划选英文，浮窗正常出现；
+六点图标完全消失；
+顶部不再有额外空白行；
+鼠标移入顶部原文标题区域，光标变成抓手；
+按住标题区域可以拖动；
+拖到侧边后继续划词，位置保持；
+翻译结果返回后位置不跳；
+关闭后再次划词位置保持；
+页面滚动时保持视口位置；
+正文仍可选择和复制；
+加入生词本、关闭、Detail 正常；
+原生 resize 正常；
+内容重建多次后，拖动不会一次移动多次；
+刷新页面后恢复默认跟随选区；
+浮窗视觉比六点手柄版本更简洁。
+
+16. 是否修改 Gateway / Cloud Run / 协议
+
+未修改 Gateway。
+未修改 Cloud Run。
+未修改 Provider。
+未修改 Prompt。
+未修改请求协议或 response schema。
+未修改 Word Analysis 或 Sentence Translation。
+未修改中文过滤、生词本数据结构、API Key 或 Token。
+不需要重新部署 Cloud Run。
+
+17. Git 状态与历史未提交边界
+
+本轮未执行 git add、git commit、git push。
+
+工作区仍存在此前历史遗留未跟踪内容，例如 release、WPS、plan_log、未纳入报告、未引用图标和 tools 目录。本轮未清理、未回滚、未删除这些内容。
+
+18. 未完成项和风险
+
+未完成项：
+Chrome/Edge GUI 验收尚未执行。
+本轮未重新生成朋友测试包。
+
+风险：
+标题区域现在不能用于选择原文标题文本，这是刻意取舍，因为该区域成为拖动入口；翻译正文仍可选择复制。
+如果某些网页或浏览器环境对 Pointer Capture 行为异常，可能需要后续基于真实 GUI 结果微调。
+
+19. 给 ChatGPT 的快速上下文
+
+本轮从 Orange翻译 v1.0.3 升级到 v1.0.4。删除了 content.js 中独立的 button.translator-plugin-panel-drag-handle 和六点 radial-gradient 样式，改为让 .translator-plugin-panel-text 同时具备 .translator-plugin-panel-drag-region 并绑定 startPanelDrag。保留现有 Pointer Events、setPointerCapture、pointerup/pointercancel/lostpointercapture、currentPanelViewportPosition、hasUserPanelPosition、ResizeObserver 和 stale response 保护。删除了旧手柄专属 click 抑制变量与函数。全量 JS 语法和 21 个 Node 测试已通过，未执行 GUI 验收，未提交或推送。

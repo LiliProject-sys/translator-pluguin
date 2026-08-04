@@ -1,0 +1,23 @@
+Gateway-5 ContextTranslation Report
+生成日期：2026-07-23
+编码：UTF-8
+
+阶段目标：
+- 保存词条立即成功；
+- 后台异步通过当前 active provider 补写 contextTranslation；
+- Gateway 路径复用 sentenceTranslation 合同；
+- 失败不回滚保存。
+
+变更文件：
+- background.js
+- gateway-language-provider.js
+- tests/gateway-provider.test.js
+
+实现摘要：
+- 现有 GENERATE_VOCABULARY_CONTEXT_TRANSLATION 链路保持不变。
+- GatewayProvider 对 sentenceTranslation 只发送白名单字段。
+- 不上传整本 vocabularyEntries。
+- 不覆盖已有 contextTranslation。
+
+敏感信息：
+- 不记录完整用户文本或完整模型响应。

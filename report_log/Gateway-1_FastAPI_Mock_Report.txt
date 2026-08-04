@@ -1,0 +1,33 @@
+Gateway-1 FastAPI Mock Report
+生成日期：2026-07-23
+编码：UTF-8
+
+阶段目标：
+- 新建 gateway/；
+- 实现 /health、/v1/auth/verify、/v1/language 三个端点合同；
+- 增加基础输入限制与 Token 校验；
+- 不调用 Gemini。
+
+变更文件：
+- gateway/app/main.py
+- gateway/app/auth.py
+- gateway/app/config.py
+- gateway/app/errors.py
+- gateway/app/schemas.py
+- gateway/requirements.txt
+- gateway/.env.example
+- gateway/contracts/fixtures/*.json
+- gateway/tests/test_gateway_contract.py
+- .gitignore
+
+实现摘要：
+- /health 不需要鉴权，不需要 requestId，不调用 Gemini。
+- /v1/auth/verify 使用 Authorization: Bearer 候选 Token，不调用 Gemini。
+- /v1/language 使用独立 Envelope，要求 requestId。
+- text 最大 5000 字符，contextSentence 最大 5000 字符，pageTitle 最大 300 字符。
+- 请求体最大 32 KB。
+- Token 比较使用 hmac.compare_digest。
+
+敏感信息：
+- 未写入真实 Token。
+- 未写入 Gemini API Key。

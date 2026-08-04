@@ -1,0 +1,162 @@
+﻿Translator-plugin 划词自动翻译开关与中文过滤 Plan 修订报告
+生成时间：2026-07-27 11:32:05
+
+1. 本轮基本信息
+
+项目：Translator-plugin
+路径：D:\Project_Experimental\Translator_Plugin
+分支：feat/gateway-beta
+当前 HEAD：06804a22d02ffe62fd714aaae1d50ff01ababb14
+本轮任务：补生成《划词自动翻译开关与中文过滤实施 Plan》的修订报告
+任务性质：Plan 修订记录与状态说明，不是新的功能实现任务
+
+实际检查结果：
+- 当前没有发现 plan_log/ 目录；
+- 修订后的 Plan 存在于 Codex 对话回复中，未实际写入 Plan TXT；
+- 本次报告生成前，工作区已经包含划词自动翻译开关与中文过滤相关功能代码改动；
+- 因此不能写成“本轮只修改了 Plan”；
+- 本次报告生成动作本身只新增这一份 report_log TXT；
+- 本次未执行 git add、git commit、git push；
+- 本次未重新打包；
+- 本次未修改 Cloud Run。
+
+2. 本轮完成内容
+
+原 Plan 中保留的正确方向：
+- Popup 新增 autoTranslateEnabled 开关；
+- 使用 chrome.storage.local 保存全扩展共享设置；
+- Popup 打开时 get 初始化，用户切换时 set 写入；
+- content.js 页面初始化读取设置，并通过 chrome.storage.onChanged 在运行中同步；
+- 多标签页无需刷新即可同步；
+- 选区只要包含汉字就静默跳过；
+- 只检查 selectedText，不检查 contextSentence；
+- 被拦截时不发送 CHECK_VOCABULARY_STATUS 和 TRANSLATE_TEXT；
+- 复用现有 CANCEL_LANGUAGE_REQUEST、currentSelectionId、requestId 与 stale-response 机制；
+- 不修改 Gateway、Cloud Run、Provider、Skill、Schema、manifest 版本。
+
+本轮 Plan 修订新增的关键点：
+- 新增 selectionIntentId；
+- selectionIntentId 专门保护“请求发出前”的异步等待阶段；
+- currentSelectionId / requestId 继续保护已经建立 snapshot 或已经发出请求后的生命周期；
+- 保留浮窗内部点击、拖动、缩放、复制等 mouseup early-return；
+- 不得在浮窗内部 early-return 前关闭面板、递增 intent、取消请求或清空 snapshot；
+- Unicode Han 检测选择现代 Chrome/Edge 方案：直接使用 /\p{Script=Han}/u；
+- Popup 写入 storage 失败时必须回滚 UI 到 previousValue；
+- storage key 被删除时按默认开启处理；
+- 增加初始化期间连续划词、等待期间关闭开关、浮窗内部 mouseup、Popup set 失败回滚、storage key 删除等测试计划。
+
+3. 修改前与修改后
+
+修改前 Plan 的不足：
+- 主要覆盖已发出请求后的取消，没有完整覆盖 storage 初始化等待期间的旧选区任务；
+- 页面刚加载时，英文 A 和英文 B 可能都等待同一个 settings Promise，resolve 后都继续执行；
+- 浮窗内部 mouseup 如果被误判为新网页选区，可能破坏“加入生词本”“详细分析”、拖动、缩放等行为；
+- Unicode property escape 如果用不当回退方式，旧环境可能在 JS 解析阶段直接失败；
+- Popup set 失败时，如果 UI 已切到 nextValue，可能与真实 storage 状态不一致；
+- 缺少 autoTranslateEnabled key 被删除后的默认开启行为说明；
+- 对竞态和内部交互的测试计划不够完整。
+
+修改后 Plan 的解决方式：
+- 增加 selectionIntentId，任何 await autoTranslateSettingsPromise 后都检查 intent 是否仍是最新；
+- 后一次选区会让前一次等待任务过期，前一次恢复后静默结束；
+- 关闭开关时也递增 selectionIntentId，并复用 closeSelectionPanel() 取消已发请求；
+- 保留 document mouseup 中现有 isEventInsideSelectionPanel(event) 与 panelPointerDown early-return；
+- 中文过滤位于创建 snapshot、创建浮窗和发送 CHECK / TRANSLATE 之前；
+- Popup 保存失败时恢复 previousValue、aria-checked、文案和可点击状态；
+- storage 删除 key 时按 true 处理，但不自动处理残留选区；
+- 新增专项竞态、回滚和内部 mouseup 测试计划。
+
+4. 实际文件与代码状态
+
+Plan 文件状态：
+- plan_log/ 不存在；
+- 修订后的 Plan 未实际写入 TXT；
+- 本报告如实记录：本轮完成了对话中的 Plan 修订，但未实际写入 Plan TXT。
+
+当前工作区中已存在的功能相关修改：
+- content.js
+- popup.html
+- popup.css
+- popup.js
+- tests/auto-translate-toggle-and-han-filter.test.js（未跟踪）
+- tests/stage10-floating-panel-interaction.test.js
+- tests/stage18_2-sentence-boundary-heuristic.test.js
+
+当前工作区中已有的历史未提交 Gateway / Cloud Run 相关修改：
+- PRIVACY.md
+- README.md
+- gateway-language-provider.js
+- gateway/README.txt
+- manifest.json
+- tests/gateway-provider.test.js
+- tools/ 目录
+- 多个 report_log/Gateway 与 Cloud Run 相关报告
+- Translator_Plugin_Releases/
+- Translator_Plugin_WPS_Addin/
+
+说明：
+这些历史未提交改动不属于本次“补生成 Plan 修订报告”任务；实现阶段和后续提交时必须单独区分，不能误删、覆盖或混入错误说明。
+
+本次报告生成不修改：
+- background.js
+- Gateway FastAPI
+- Cloud Run 配置
+- Provider / Skill / Schema
+- manifest 版本
+- Git 历史
+
+5. 检查与验收状态
+
+本次实际执行：
+- 读取用户提供的补报告 Prompt；
+- 执行 Get-Location；
+- 执行 git branch --show-current；
+- 执行 git rev-parse HEAD；
+- 执行 git status --short；
+- 执行 git diff --stat；
+- 执行 git diff --name-status；
+- 检查 plan_log/ 是否存在；
+- 检查是否已有同名 Plan 修订报告；
+- 检查当前工作区是否已有功能代码改动；
+- 生成本 TXT 报告。
+
+本次未执行：
+- 未重新修改 Plan；
+- 未开始新的功能代码实现；
+- 未运行 Node 自动测试；
+- 未运行 Chrome/Edge 人工验收；
+- 未重新生成朋友测试包；
+- 未部署或修改 Cloud Run；
+- 未执行 Git add / commit / push。
+
+注意：
+当前工作区中已经存在上一轮功能实现相关改动，但本次报告任务没有再次验证这些功能是否可用。不能把本报告写成“中文过滤和开关已经通过人工验收”。
+
+6. Git 状态、未完成项与风险
+
+当前分支：feat/gateway-beta
+当前 HEAD：06804a22d02ffe62fd714aaae1d50ff01ababb14
+本次是否 commit：否
+本次是否 push：否
+本次是否包含 Token、Gemini API Key、Secret Manager 内容：否
+
+当前 git status 简要结果：
+- 已修改：PRIVACY.md、README.md、content.js、gateway-language-provider.js、gateway/README.txt、manifest.json、popup.css、popup.html、popup.js、tests/gateway-provider.test.js、tests/stage10-floating-panel-interaction.test.js、tests/stage18_2-sentence-boundary-heuristic.test.js
+- 未跟踪：tests/auto-translate-toggle-and-han-filter.test.js、tools/、Translator_Plugin_Releases/、Translator_Plugin_WPS_Addin/、多个 report_log 报告
+
+未完成项：
+- 如果目标仍是“只保留 Plan 修订”，需要用户决定是否回滚或暂存上一轮功能代码改动；
+- 如果目标改为继续完成并发布该功能，需要进行 Chrome/Edge 人工验收；
+- 实现完成后需要重新加载扩展；
+- 若要给朋友测试，需要重新生成朋友测试包；
+- 不需要重新部署 Cloud Run。
+
+风险提醒：
+- 当前工作区已有较多未提交历史改动，后续 commit 前必须仔细分组；
+- 本报告不能替代功能验收；
+- 不要把 report_log、release、WPS、私密记录或测试包误提交；
+- 不要在任何报告或代码中写入真实 Token、Gemini API Key 或 Secret 内容。
+
+7. 给 ChatGPT 的快速上下文
+
+当前只需要理解：用户原本要求修订“划词自动翻译开关与中文过滤”的实施 Plan。修订后的核心是增加 selectionIntentId，用来保护 storage 初始化等待期间的旧选区任务，并明确保留浮窗内部 mouseup early-return，避免点击按钮、拖动或缩放时误触发新选区流程。Plan 还补充了 Popup 写入失败回滚、storage key 删除时默认开启、以及新的竞态测试计划。功能本身在当前工作区已出现代码改动，但本报告任务没有进行新的功能实现、Git 操作、打包或 Cloud Run 部署。下一步应由用户决定：继续做人工验收与打包，还是先整理/隔离当前未提交改动。

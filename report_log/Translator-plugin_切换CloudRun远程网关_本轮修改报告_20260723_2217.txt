@@ -1,0 +1,146 @@
+1. 本轮基本信息
+
+项目：Translator-plugin
+仓库路径：D:\Project_Experimental\Translator_Plugin
+分支：feat/gateway-beta
+本轮任务：CloudRun-5，将 Chrome 插件 Gateway Beta 从本地 Gateway 地址切换到已验证通过的 Cloud Run HTTPS 地址，并完成自动测试与远程人工验收准备。
+旧地址：http://127.0.0.1:8000
+新地址：https://translator-gateway-beta-268073468344.asia-northeast1.run.app
+执行边界：未 git add；未 git commit；未 git push；未部署 Cloud Run；未修改 Secret Manager；未升级 manifest 版本；未打包朋友测试 ZIP；未发布 Chrome Web Store。
+
+2. 本轮完成了什么
+
+完成了只读 Git 审计、Gateway URL 唯一位置确认、插件 URL 切换、manifest host_permissions 切换、GatewayProvider 测试更新、公开说明最小更新、自动测试和待人工验收清单准备。
+
+本轮修改文件：
+- gateway-language-provider.js
+- manifest.json
+- tests/gateway-provider.test.js
+- README.md
+- PRIVACY.md
+- gateway/README.txt
+
+本轮未修改：
+- Cloud Run 服务端代码；
+- Gateway API 合同；
+- Skill；
+- Provider 架构；
+- content.js 主链路；
+- Token 鉴权方式；
+- Gemini 模型；
+- manifest 版本号。
+
+3. 修改前 → 修改后
+
+修改前：
+- 插件 GatewayProvider 请求 http://127.0.0.1:8000；
+- manifest host_permissions 包含 http://127.0.0.1:8000/*；
+- README / PRIVACY 中仍把 Gateway Beta 描述为本地模式；
+- GatewayProvider 测试断言本地 Gateway 地址。
+
+修改后：
+- GatewayProvider 唯一源码 URL 切换为 https://translator-gateway-beta-268073468344.asia-northeast1.run.app；
+- manifest 删除本地 Gateway 权限，新增精确 Cloud Run host permission；
+- GatewayProvider 测试断言 /v1/language 和 /v1/auth/verify 使用 Cloud Run base URL；
+- 测试确认 manifest 不含 127.0.0.1、localhost 或过宽 *.run.app；
+- README / PRIVACY 说明 Gateway Beta 已走 Cloud Run，普通用户不需要 Gemini API Key；
+- gateway/README.txt 保留本地脚本说明，但明确本地脚本只用于开发调试，当前插件 Beta 默认连接 Cloud Run。
+
+4. URL、manifest 与数据链路变化
+
+唯一 URL 配置文件：
+- gateway-language-provider.js
+
+Gateway URL：
+- GATEWAY_BASE_URL = https://translator-gateway-beta-268073468344.asia-northeast1.run.app
+
+manifest 权限：
+- 删除：http://127.0.0.1:8000/*
+- 未发现：http://localhost:8000/*
+- 新增：https://translator-gateway-beta-268073468344.asia-northeast1.run.app/*
+- 未使用：https://*.run.app/*
+- manifest 版本仍为 1.0.1。
+
+目标数据链路：
+Chrome 插件
+→ Cloud Run HTTPS Gateway
+→ FastAPI
+→ Secret Manager
+→ Gemini 3.1 Flash-Lite
+→ FastAPI
+→ GatewayProvider
+→ 现有 Validator
+→ 浮窗
+
+数据边界保持不变：
+- Token 仍只通过 Authorization Header 发送；
+- Token 不进入 JSON body；
+- 语言请求 body 仍只发送白名单字段；
+- 不发送 pageUrl、Cookie、浏览器历史、全量生词本、本地 API Key、userQuestion、Prompt、Skill、模型名或 providerPreference；
+- requestId 校验、AbortController 取消机制、Envelope 解包和 Validator 均未改动。
+
+5. 自动测试与待人工验收
+
+已执行并通过：
+- node .\tests\gateway-provider.test.js：通过；
+- 全量 tests/*.test.js Node 回归：全部通过；
+- manifest.json Node 解析与权限检查：通过；
+- URL 唯一性检查：运行代码中 Gateway URL 只在 gateway-language-provider.js 定义，manifest 只保留精确 Cloud Run host permission；
+- git diff --check：无实际 whitespace error，仅 Windows LF/CRLF 提示；
+- 修改文件敏感扫描：未发现真实 Token 或 Gemini API Key。
+
+未执行：
+- 未从 Codex 环境真实调用 Cloud Run /v1/language；
+- 未使用真实共享 Token；
+- 未使用真实 Gemini API Key；
+- 未启动本地 Uvicorn；
+- 未修改 chrome.storage.local；
+- 未进行 Chrome GUI 人工验收。
+
+用户后续人工验收清单：
+1. 关闭本地 Gateway 窗口，或在本地 Gateway 窗口按 Ctrl+C；
+2. 确认 http://127.0.0.1:8000/health 已无法访问；
+3. 打开 chrome://extensions；
+4. 重新加载 Translator-plugin；
+5. 打开设置页；
+6. 确认当前 Provider 为 Gateway Beta；
+7. 使用已保存 Token，或重新输入共享 Token 验证；
+8. 检查顶部显示“已连接，可以开始使用”；
+9. 测试 Word Quick；
+10. 测试 Word Detail；
+11. 测试 Sentence Translation；
+12. 测试生词保存；
+13. 检查是否出现 contextTranslation；
+14. 在 Cloud Run 日志中确认出现 /v1/auth/verify 与 /v1/language；
+15. 确认本地 Gateway 关闭时插件仍正常工作。
+
+人工验收成功判定：
+本地 127.0.0.1 服务关闭 + 插件正常验证 Token + 单词与整句功能正常 + Cloud Run 日志出现请求 = Chrome 插件远程 Cloud Run 链路跑通。
+
+6. Git、安全、未完成项
+
+Git 状态：
+- 本轮未 git add；
+- 本轮未 git commit；
+- 本轮未 git push；
+- 本地 HEAD 与 origin/feat/gateway-beta 仍一致：06804a22d02ffe62fd714aaae1d50ff01ababb14；
+- 当前改动保留在工作区，等待用户完成 Chrome 远程人工验收。
+
+安全状态：
+- 未写入完整共享 Token；
+- 未写入 Gemini API Key；
+- 未写入 .env 内容；
+- 未写入 Secret Manager 内容；
+- 未写入完整用户文本、完整 Prompt 或完整模型响应；
+- 普通用户仍不能查看或编辑 Gateway URL。
+
+未完成项：
+- Chrome GUI 远程链路尚未由用户验收；
+- 尚未 commit / push 本轮切换；
+- 尚未生成朋友测试 ZIP；
+- 尚未升级 manifest 到 1.1.0；
+- 尚未发布 Chrome Web Store。
+
+7. 给 ChatGPT 的快速上下文
+
+CloudRun-5 代码切换已完成但未提交。插件唯一 Gateway URL 已从 http://127.0.0.1:8000 切到 https://translator-gateway-beta-268073468344.asia-northeast1.run.app，位置在 gateway-language-provider.js。manifest host_permissions 已删除本地 127.0.0.1 权限，新增精确 Cloud Run host。GatewayProvider 测试和全量 Node 回归均通过。README、PRIVACY、gateway/README 已最小更新。Cloud Run 后端由用户此前确认 health、verify、language 和 Gemini 真实调用均成功。下一步需要用户关闭本地 Gateway，重新加载 Chrome 插件并做远程 GUI 验收；验收通过后再单独 commit、push、准备朋友测试 ZIP 和决定 1.1.0。

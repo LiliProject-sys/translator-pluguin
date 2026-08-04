@@ -87,12 +87,28 @@ if (-not (Test-Path -LiteralPath $environmentFile)) {
 }
 
 $envValues = Get-EnvValues -EnvPath $environmentFile
-$requiredVariables = @("BETA_ACCESS_TOKEN", "GEMINI_API_KEY", "GEMINI_MODEL")
+$requiredVariables = @("BETA_ACCESS_TOKEN")
 
 foreach ($name in $requiredVariables) {
     if (-not $envValues.ContainsKey($name) -or [string]::IsNullOrWhiteSpace($envValues[$name])) {
         Stop-WithError "gateway/.env 缺少必需环境变量：$name"
     }
+}
+
+$upstreamProvider = if ($envValues.ContainsKey("GATEWAY_UPSTREAM_PROVIDER")) {
+    $envValues["GATEWAY_UPSTREAM_PROVIDER"].Trim().ToLowerInvariant()
+}
+else {
+    "gemini"
+}
+
+if ($upstreamProvider -notin @("gemini", "deepseek")) {
+    Stop-WithError "GATEWAY_UPSTREAM_PROVIDER 只允许 gemini 或 deepseek。"
+}
+
+$providerKeyName = if ($upstreamProvider -eq "deepseek") { "DEEPSEEK_API_KEY" } else { "GEMINI_API_KEY" }
+if (-not $envValues.ContainsKey($providerKeyName) -or [string]::IsNullOrWhiteSpace($envValues[$providerKeyName])) {
+    Stop-WithError "当前上游为 $upstreamProvider，gateway/.env 缺少必需环境变量：$providerKeyName"
 }
 
 $healthState = Test-GatewayHealth -HealthUrl $healthUrl
@@ -109,6 +125,7 @@ if ($healthState -eq "other") {
 }
 
 Write-Info "正在启动 Translator-plugin 本地 Gateway..."
+Write-Info "当前上游：$upstreamProvider"
 Write-Info "本地地址：$localUrl"
 Write-Info "Health：$healthUrl"
 Write-Info "Docs：$docsUrl"

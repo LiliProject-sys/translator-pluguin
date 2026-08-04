@@ -1,0 +1,28 @@
+Translator-plugin Gateway Beta Final Report
+生成日期：2026-07-23
+编码：UTF-8
+
+完成范围：
+- 本地 FastAPI Gateway；
+- 本地 /health、/v1/auth/verify、/v1/language；
+- 服务端固定 Gemini Skill 与 schema 校验；
+- 插件 GatewayProvider；
+- 设置页欢迎区和 Token 验证流；
+- contextTranslation 复用 Gateway 路径；
+- Cloud Run Dockerfile 与说明准备。
+
+未完成且需后续授权：
+- Cloud Run 实际部署；
+- Cloud Run 环境变量设置；
+- 获取正式 HTTPS 地址；
+- 替换正式 Gateway URL 与 host_permissions；
+- 朋友远程 Beta 打包与验收；
+- manifest 实际升级到 1.1.0。
+
+敏感信息规则：
+- 完整 Beta Token 保存路径为 D:\Project_Experimental\Translator_Plugin_private\Translator-plugin_Beta共享访问Token_请勿上传GitHub.txt。
+- Token 脱敏摘要：CHXN7W...vzmz7E。
+- 本地服务端副本为 gateway/.env，已被 .gitignore 排除。
+- 本报告不包含完整 Token。
+- 本报告不包含 Gemini API Key。
+- 本报告不包含完整用户文本、完整 Prompt、完整模型响应、Cookie 或真实用户数据。

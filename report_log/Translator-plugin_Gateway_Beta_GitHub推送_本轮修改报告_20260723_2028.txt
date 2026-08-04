@@ -1,0 +1,113 @@
+1. 本轮基本信息
+
+项目：Translator-plugin
+仓库路径：D:\Project_Experimental\Translator_Plugin
+GitHub 仓库：https://github.com/LiliProject-sys/translator-pluguin.git
+当前分支：feat/gateway-beta
+本轮任务：CloudRun-0，在部署 Cloud Run 前将本地已跑通的 Gateway Beta 代码安全提交并推送到 GitHub 功能分支。
+执行边界：未合并 main；未 force push；未部署 Cloud Run；未创建 Google Cloud 资源；未替换正式 Gateway HTTPS 地址；未升级 manifest 版本；未打包 ZIP。
+
+2. 本轮完成了什么
+
+完成了只读 Git 审计、提交前测试、敏感信息检查、显式暂存、功能提交、远程推送和推送后校验。
+
+本轮提交内容包括：
+- FastAPI Gateway 服务端代码；
+- GatewayProvider 插件接入；
+- 设置页 Gateway Beta Token 验证与欢迎流程；
+- Provider 注册与本地 host permission；
+- Gateway 合同 fixture；
+- Python 与 Node 自动测试；
+- 本地启动脚本 gateway/启动本地网关.ps1；
+- 便捷入口 gateway/启动本地网关.cmd；
+- Gateway 本地 README；
+- README、CHANGELOG、PRIVACY、SECURITY 等公开说明更新。
+
+本轮没有提交旧阶段报告，没有提交本轮报告，没有提交 gateway/.env、gateway/.venv、缓存、私密 Token TXT 或任何真实凭据。
+
+3. 修改前 → 修改后
+
+修改前：
+- Gateway Beta 代码只存在本地功能分支工作区中；
+- 远程 origin 上没有 feat/gateway-beta 分支；
+- 本地 Gateway 启动脚本从 C:\Windows\System32 运行时曾暴露出未先识别已运行 Gateway 的问题。
+
+修改后：
+- 创建了功能提交 feat: add local Gateway beta integration；
+- 推送到 origin/feat/gateway-beta，并设置 upstream；
+- 本地 HEAD 与 origin/feat/gateway-beta 一致；
+- 启动脚本已最小修复，可从任意工作目录运行，能先通过 /health 识别本地 Gateway 已运行，并保持不打印 Token 或 Gemini API Key。
+
+4. 测试结果
+
+提交前实际通过：
+- .\gateway\.venv\Scripts\python.exe -m unittest gateway.tests.test_gateway_contract：通过，7 tests；
+- .\gateway\.venv\Scripts\python.exe -m compileall gateway：通过；
+- node .\tests\gateway-provider.test.js：通过；
+- 全量 tests/*.test.js Node 回归：全部通过；
+- PowerShell Parser 检查 gateway/启动本地网关.ps1：通过；
+- 从 C:\Windows\System32 执行 gateway/启动本地网关.ps1：识别本地 Gateway 已运行并退出 0；
+- GET http://127.0.0.1:8000/health：返回 status=ok、service=translator-gateway；
+- git diff --check 与 git diff --cached --check：通过，仅出现 Windows LF/CRLF 提示。
+
+用户此前已实际确认：
+- /health 返回 200；
+- /v1/auth/verify 返回 200；
+- /v1/language 返回 200；
+- 插件当前 Provider 为 Gateway Beta；
+- Word Quick、Word Detail、Sentence Translation 均可通过 Gateway Beta 正常显示；
+- 实际链路为 Chrome 插件 → GatewayProvider → 本地 FastAPI → Gemini → FastAPI → 插件浮窗。
+
+仍未在本轮重新人工验证：
+- contextTranslation 完整保存补写链路；
+- 错误 Token 不覆盖旧配置；
+- Gateway 离线错误展示；
+- 关闭浮窗取消请求；
+- 快速切换选区旧结果不覆盖；
+- 首次安装自动打开 options。
+
+5. Git commit 与 push 结果
+
+commit hash：0e7d6fe1b09080809efe9fa6753f69fc23348217
+commit message：feat: add local Gateway beta integration
+
+推送结果：
+- git push -u origin feat/gateway-beta 成功；
+- upstream 已设置为 origin/feat/gateway-beta；
+- 本地 HEAD：0e7d6fe1b09080809efe9fa6753f69fc23348217；
+- origin/feat/gateway-beta：0e7d6fe1b09080809efe9fa6753f69fc23348217；
+- 本地 HEAD 与远程功能分支一致。
+
+推送过程中未执行：
+- force push；
+- --force-with-lease；
+- 删除远程分支；
+- 推送到 main；
+- 创建或合并 Pull Request。
+
+6. 安全检查与未完成项
+
+安全检查结果：
+- gateway/.env 仍被 .gitignore 忽略；
+- git ls-files gateway\.env 无输出，确认 .env 未 tracked；
+- staged 文件敏感扫描未发现真实 Token 或 API Key 风险；
+- 命中的 BETA_ACCESS_TOKEN、GEMINI_API_KEY 仅为代码变量读取、测试假值或 .env.example 示例值；
+- 仓库内未发现私密 Token TXT；
+- 本报告未包含完整 Beta Token、Gemini API Key、.env 内容、完整用户文本、完整 Prompt 或完整模型响应。
+
+当前工作区状态：
+- 已提交并推送的代码工作区干净；
+- 旧阶段报告和本轮报告仍为本地未跟踪文件，按本轮要求未纳入 commit。
+
+未完成项：
+- 未部署 Cloud Run；
+- 未创建 Google Cloud 资源；
+- 未设置 Cloud Run 环境变量；
+- 未获得 run.app HTTPS 地址；
+- 未替换正式 Gateway URL 或正式 host_permissions；
+- 未升级到 1.1.0；
+- 未打包朋友远程测试 ZIP。
+
+7. 给 ChatGPT 的快速上下文
+
+CloudRun-0 已完成：Translator-plugin 的 Gateway Beta 本地代码已提交并推送到 GitHub 功能分支 feat/gateway-beta。提交为 0e7d6fe1b09080809efe9fa6753f69fc23348217，提交信息为 feat: add local Gateway beta integration。本地 HEAD 与 origin/feat/gateway-beta 一致。提交包含 FastAPI Gateway、GatewayProvider、设置页 Gateway Token 流程、合同 fixture、自动测试、Dockerfile、README 和本地启动脚本。gateway/.env、gateway/.venv、旧报告和本轮报告未提交。下一步应进入 CloudRun-1：Dockerfile 与部署路径审计，仍不要直接部署，除非用户再次明确授权。

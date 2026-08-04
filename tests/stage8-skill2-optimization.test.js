@@ -1,4 +1,4 @@
-﻿const assert = require("assert");
+const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
@@ -105,7 +105,7 @@ function testCompatibilityInvariants() {
   assert(background.includes('const STORAGE_KEY = "vocabularyEntries"'));
   assert(background.includes('type === "CHECK_VOCABULARY_STATUS"'));
   assert(background.includes('type !== "SAVE_VOCABULARY_ENTRY"'));
-  assert.equal(manifest.version, "1.0.2");
+  assert.equal(manifest.version, "1.0.4");
   assert.equal(manifest.manifest_version, 3);
 }
 

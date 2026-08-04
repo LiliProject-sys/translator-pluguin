@@ -1,0 +1,144 @@
+Orange翻译 DeepSeek V4 Flash Max 思考模式测试调整整体变更报告
+
+一、本轮范围
+
+项目目录：D:\Project_Experimental\Translator_Plugin
+分支：feat/gateway-beta
+HEAD：4ecfda5d64bde8b3ee103da855c27fcd2f2e62aa
+当前 manifest 版本：1.0.4
+
+本轮是 DeepSeek V4 Flash 的单变量测试调整，只改变思考模式和思考强度。工作区原有的多轮未提交修改未被清理、回滚、覆盖或重新归因。
+
+二、请求参数变化
+
+修改前 DeepSeek 请求相关参数：
+- model：deepseek-v4-flash
+- thinking.type：disabled
+- response_format.type：json_object
+- stream：false
+- 未设置 reasoning_effort
+
+修改后：
+- model：deepseek-v4-flash
+- thinking.type：enabled
+- reasoning_effort：max
+- response_format.type：json_object
+- stream：false
+
+system/user message、Word/Sentence Skill、TARGET/CONTEXT、Schema、Provider 选择和错误处理保持不变。没有设置 temperature，没有添加工具调用。
+
+三、配置方式
+
+本轮没有新增思考模式环境变量，也没有建立新的配置框架。当前 DeepSeek Client 使用固定的：
+
+DEEPSEEK_THINKING_TYPE = enabled
+DEEPSEEK_REASONING_EFFORT = max
+
+这是基于当前项目没有统一思考模式配置结构所采用的最小固定修改。真实 DeepSeek API Key 仍只允许存在于 ignored 的 gateway/.env 或服务端 Secret 中，本报告不记录其值。
+
+四、实际修改文件
+
+- gateway/app/deepseek_client.py
+  - 将 thinking.type 改为 enabled；
+  - 增加 reasoning_effort=max；
+  - 将思考模式信息写入本地比较工具使用的脱敏 telemetry；
+  - 不返回模型的内部思考内容，不改变业务 JSON 解析。
+
+- gateway/compare_upstreams.py
+  - 对 DeepSeek 比较结果标记 thinking=enabled、reasoningEffort=max；
+  - 不输出 Key、Authorization、内部思考内容或完整 Secret。
+
+- gateway/tests/test_deepseek_client.py
+  - 更新请求体断言；
+  - 验证 enabled、max、model、JSON Output、stream 和 max_tokens；
+  - 验证业务结果不包含模型内部思考内容。
+
+本轮没有修改 Gemini Adapter、Gateway 配置切换方案、浏览器代码、options、storage、manifest、Word Analysis Skill、Sentence Translation Skill、Pydantic Schema、Gateway payload、Cloud Run 配置或朋友测试包。
+
+五、max_tokens 与重试
+
+本轮没有修改三档输出上限：
+- Word Quick：256；
+- Word Detail：512；
+- Sentence Translation：8192。
+
+没有修改 timeout、空响应单次重试、JSON 解析、Schema 校验、finish reason 处理或错误映射。
+
+如果 Max 思考模式导致输出预算不足，现有逻辑仍会将 length 映射为截断错误；本轮不自动扩大 max_tokens。空响应仍最多重试一次，第二次仍空则失败。
+
+六、自动测试
+
+实际执行并通过：
+
+- python -m unittest discover -s gateway\\tests -p "test_*.py"
+  - 22 项通过；
+- tests/*.test.js 全量 Node 测试
+  - 21 个测试文件全部通过；
+- 递归 JavaScript node --check
+  - 34 个文件通过；
+- 递归 Python py_compile
+  - 17 个文件通过；
+- manifest UTF-8 JSON 解析、MV3 和版本 1.0.4 检查通过；
+- git diff --check 通过。
+
+DeepSeek 专项测试确认：
+- thinking.type 为 enabled；
+- reasoning_effort 为 max；
+- 不再发送 disabled；
+- model 仍为 deepseek-v4-flash；
+- response_format 仍为 json_object；
+- stream 仍为 false；
+- Word Quick/Detail/Sentence Translation 的 max_tokens 仍为 256/512/8192；
+- 只解析 message.content；
+- 模型内部思考内容不进入业务结果；
+- 空响应重试、非法 JSON、Schema 和错误映射保持原行为；
+- Gemini 测试和 Gateway contract 回归通过。
+
+七、真实 API 状态
+
+本轮没有调用真实 DeepSeek API，也没有执行真实翻译质量对比。因此不能声称 Max 思考模式已经改善 Distributed Radar、Codex Radar、句子关系或整体翻译质量。
+
+用户后续可在本地 ignored 的 gateway/.env 中安全配置 DeepSeek Key，并确认：
+
+GATEWAY_UPSTREAM_PROVIDER=deepseek
+DEEPSEEK_MODEL=deepseek-v4-flash
+
+然后运行固定样本比较工具，重点观察：
+- Distributed Radar 是否仍被错误直译；
+- Codex Radar 是否被识别为名称；
+- TARGET 是否严格；
+- JSON 是否稳定；
+- 总耗时与 token usage；
+- 是否出现截断错误；
+- 是否出现空响应重试。
+
+推荐命令：
+
+python gateway\\compare_upstreams.py --providers deepseek
+
+不要把 Key 写入命令历史、代码、报告、ZIP 或聊天内容。
+
+八、部署与版本边界
+
+- manifest 未变化，仍为 1.0.4；
+- 未修改 Cloud Run Secret；
+- 未部署 Cloud Run Revision；
+- 未切换 Cloud Run 流量；
+- 未重新打包朋友测试包；
+- 未执行 commit 或 push；
+- 未进行 Chrome GUI 验收。
+
+本轮参数修改只有在包含新 DeepSeek Adapter 的 Gateway 本地进程或后续重新部署的 Cloud Run Revision 中生效，不会自动改变当前已部署服务。
+
+九、风险与限制
+
+- Max 思考模式可能增加延迟；
+- 可能增加输出 token 或整体成本；
+- 思考过程可能挤压最终 JSON 输出预算；
+- 可能出现 finish_reason=length、JSON 截断、Schema 校验失败或空 content；
+- 本轮没有通过前端显示思考内容，也没有把思考内容写入日志、生词本或响应；
+- 没有真实 API 结果，因此暂无 Gemini 与 DeepSeek 的质量、速度或成本结论。
+
+十、给 ChatGPT 的快速上下文
+
+Orange翻译 Gateway DeepSeek V4 Flash 已从关闭思考调整为 enabled + reasoning_effort=max。Skill、Schema、Gemini、三档 max_tokens、重试和错误映射均保持不变。22 项 Gateway Python 测试、21 个 Node 测试文件、34 个 JS 语法检查和 17 个 Python 语法检查均通过。真实 DeepSeek API、Cloud Run、GUI、Git commit/push 均未执行，下一步等待用户在本地安全配置 Key 后测试固定样本。

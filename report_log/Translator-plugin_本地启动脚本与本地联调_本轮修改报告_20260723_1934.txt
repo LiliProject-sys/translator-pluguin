@@ -1,0 +1,116 @@
+1. 本轮基本信息
+
+项目：Translator-plugin
+仓库路径：D:\Project_Experimental\Translator_Plugin
+分支：feat/gateway-beta
+本轮任务：补充本地 Gateway 一键启动脚本，并按精简报告规范生成本轮测试报告。
+执行边界：未部署 Cloud Run；未修改正式 HTTPS Gateway 地址；未升级 manifest 版本；未打包 ZIP；未执行 git add、commit、push。
+
+2. 本轮完成了什么
+
+新增本地启动脚本：
+- gateway/启动本地网关.ps1
+
+更新本地说明：
+- gateway/README.txt
+
+新增本轮报告：
+- report_log/Translator-plugin_本地启动脚本与本地联调_本轮修改报告_20260723_1934.txt
+
+脚本能力：
+- 使用 $PSScriptRoot 定位 gateway 目录，并推导项目根目录；
+- 检查 gateway/.venv/Scripts/python.exe 是否存在；
+- 检查 gateway/.env 是否存在；
+- 检查 BETA_ACCESS_TOKEN、GEMINI_API_KEY、GEMINI_MODEL 是否存在且非空；
+- 不打印 Token 或 Gemini API Key；
+- 固定使用 http://127.0.0.1:8000；
+- 启动命令为 python -m uvicorn gateway.app.main:app --host 127.0.0.1 --port 8000 --env-file gateway/.env；
+- 前台运行，Ctrl+C 可停止；
+- 如果 /health 已返回 translator-gateway，则提示本地 Gateway 已运行并退出 0；
+- 如果 8000 端口上是其他服务，则受控报错，不尝试杀进程。
+
+3. 修改前 → 修改后
+
+修改前：
+- 本地 Gateway 需要手动记住虚拟环境 Python、uvicorn 参数、host、port 和 .env 加载方式；
+- README 中没有把一键启动脚本作为推荐入口；
+- 本轮没有按新的精简报告规范单独记录启动脚本与本地联调测试结果。
+
+修改后：
+- 可在仓库根目录运行 .\gateway\启动本地网关.ps1 启动或识别本地 Gateway；
+- README 已补充推荐启动命令、健康检查地址、API Docs 地址、Ctrl+C 停止方式和本地/Cloud Run 环境变量边界；
+- 本轮生成一份中文 UTF-8 TXT 报告，采用 7 段精简结构。
+
+4. 接口、调用链和数据变化
+
+本轮未改动 Gateway API 合同、Provider 请求体白名单、插件调用链或词库数据结构。
+
+本轮新增的本地启动链路：
+用户运行 gateway/启动本地网关.ps1
+→ 脚本检查 gateway/.venv、gateway/.env 和必需环境变量
+→ 脚本检查 http://127.0.0.1:8000/health
+→ 若已是 translator-gateway，则直接退出 0
+→ 若未运行，则以前台方式启动 Uvicorn
+→ FastAPI Gateway 读取 gateway/.env 中的本地环境变量
+
+安全边界：
+- Token 与 Gemini API Key 只做存在性检查，不输出真实值；
+- 本地脚本只绑定 127.0.0.1；
+- Cloud Run 阶段仍应使用平台环境变量，不依赖本地 gateway/.env。
+
+5. 测试与人工验收
+
+已执行测试：
+- PowerShell 语法检查：通过；
+- 缺 gateway/.venv 控制测试：非零退出，中文错误，通过；
+- 缺 gateway/.env 控制测试：非零退出，中文错误，通过；
+- 缺 GEMINI_API_KEY 控制测试：非零退出，中文错误，通过；
+- 以上异常分支未泄露测试用假 Token；
+- 实际 /health smoke test：http://127.0.0.1:8000/health 返回 status=ok、service=translator-gateway；
+- 实际执行 gateway/启动本地网关.ps1：识别本地 Gateway 已运行并退出 0；
+- gateway/.venv/Scripts/python.exe -m unittest gateway.tests.test_gateway_contract：7 tests passed；
+- node tests/gateway-provider.test.js：gateway-provider-tests-ok；
+- git diff --check：无实际空白错误，仅 Windows LF/CRLF 提示；
+- gateway/.env 忽略检查：git status --short --ignored gateway\.env 显示 !! gateway/.env。
+
+用户此前已实际反馈确认：
+- GET /health 200；
+- POST /v1/auth/verify 200；
+- 设置页显示 Gateway Beta 已连接；
+- 当前 Provider 为 Gateway Beta；
+- POST /v1/language 200；
+- Chrome 插件已通过 Gateway Beta 完成 Word Quick、Word Detail、Sentence Translation 浮窗展示；
+- 实际链路为 Chrome 插件 → GatewayProvider → 本地 FastAPI → Gemini → FastAPI → 插件浮窗。
+
+本轮未重新人工执行的 GUI 项：
+- contextTranslation 完整保存补写链路；
+- 错误 Token 不覆盖旧配置；
+- Gateway 离线错误展示；
+- 关闭浮窗取消请求；
+- 快速切换选区旧结果不覆盖；
+- 首次安装自动打开 options。
+
+6. Git、安全、未完成项
+
+Git 状态：
+- 本轮未执行 git add；
+- 本轮未执行 git commit；
+- 本轮未执行 git push；
+- 当前工作区仍包含 Gateway Beta 相关未提交改动，以及本轮新增脚本、README 更新和本报告。
+
+安全检查：
+- 未在脚本、README 或本报告中写入完整 Beta Token；
+- 未在脚本、README 或本报告中写入 Gemini API Key；
+- 未输出完整用户文本、完整 Prompt、完整模型响应、Cookie 或真实用户数据；
+- gateway/.env 仍处于 Git 忽略状态。
+
+未完成项：
+- 仍未部署 Cloud Run；
+- 仍未替换正式 Gateway HTTPS 地址；
+- 仍未修改正式 host_permissions；
+- 仍未升级到 1.1.0；
+- 仍未生成远程朋友测试 ZIP。
+
+7. 给 ChatGPT 的快速上下文
+
+本轮只补充本地启动脚本与报告，没有调整 Gateway API 或插件 Provider 架构。新增 gateway/启动本地网关.ps1，推荐从仓库根目录运行 .\gateway\启动本地网关.ps1。脚本会检查 gateway/.venv、gateway/.env、BETA_ACCESS_TOKEN、GEMINI_API_KEY、GEMINI_MODEL，并固定使用 127.0.0.1:8000。若 /health 已是 translator-gateway，脚本会提示已运行并退出 0；否则以前台方式启动 Uvicorn。README 已同步说明。指定 Python 合同测试与 Node GatewayProvider 测试均已通过。本轮未提交 Git，未部署，未升级版本。

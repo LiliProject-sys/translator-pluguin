@@ -9,14 +9,14 @@ from fastapi.responses import JSONResponse
 from .auth import require_beta_token
 from .config import MAX_REQUEST_BODY_BYTES, settings
 from .errors import error_payload, gateway_error
-from .gemini_client import GeminiClient
+from .language_service import process_language_request
 from .schemas import LanguageRequest
-from .skills import sentence_translation, word_analysis
+from .upstream import get_upstream_client
 
 
-def create_app(gemini_client: GeminiClient | None = None) -> FastAPI:
+def create_app(upstream_client=None) -> FastAPI:
     app = FastAPI(title="translator-gateway")
-    client = gemini_client or GeminiClient()
+    client = upstream_client or get_upstream_client(settings.gateway_upstream_provider)
 
     @app.middleware("http")
     async def limit_request_body(request: Request, call_next):
@@ -67,31 +67,7 @@ def create_app(gemini_client: GeminiClient | None = None) -> FastAPI:
 
     @app.post("/v1/language")
     async def language(payload: LanguageRequest, token: str = Depends(require_beta_token)):
-        if payload.requestType == "wordAnalysis":
-            prompt = word_analysis.build_prompt(payload)
-            schema_model = word_analysis.get_schema_model(payload.analysisMode)
-            result = client.generate_json(prompt, schema_model, payload.requestId)
-            data = {
-                "provider": "gateway",
-                "upstreamProvider": "gemini",
-                "resultType": "contextAnalysis",
-                "skillVersion": word_analysis.SKILL_VERSION,
-                "analysisMode": payload.analysisMode,
-                "analysis": result,
-            }
-        elif payload.requestType == "sentenceTranslation" and payload.analysisMode == "quick":
-            prompt = sentence_translation.build_prompt(payload)
-            result = client.generate_json(prompt, sentence_translation.get_schema_model(), payload.requestId)
-            data = {
-                "provider": "gateway",
-                "upstreamProvider": "gemini",
-                "resultType": "sentenceTranslation",
-                "skillVersion": sentence_translation.SKILL_VERSION,
-                "translation": result["translation"],
-                "keyTerm": result["keyTerm"],
-            }
-        else:
-            raise gateway_error(400, "INVALID_REQUEST", "请求字段不合法", False, payload.requestId)
+        data = process_language_request(payload, client)
 
         return {
             "status": "ok",

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Orange翻译 生词本</title>
+    <link rel="stylesheet" href="vocabulary.css">
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <h1>生词本</h1>
+        <p id="entryCount" class="entry-count">0 个词条</p>
+      </div>
+      <button id="settingsButton" type="button">设置</button>
+    </header>
+
+    <main>
+      <section class="toolbar" aria-label="生词本工具栏">
+        <label class="search-label">
+          <span>搜索</span>
+          <input id="searchInput" type="search" placeholder="搜索单词、释义、原句或来源">
+        </label>
+
+        <label class="sort-label">
+          <span>排序</span>
+          <select id="sortSelect">
+            <option value="random">随机</option>
+            <option value="recent">最近添加</option>
+            <option value="alphabetical">字母顺序</option>
+          </select>
+        </label>
+
+        <button id="reshuffleButton" type="button">重新随机</button>
+      </section>
+
+      <section id="emptyState" class="empty-state" hidden>
+        还没有保存词条。请在网页中选中文字后点击浮窗加入，也可以右键加入生词本。
+      </section>
+
+      <section id="entryList" class="entry-list" aria-live="polite"></section>
+    </main>
+
+    <script src="vocabulary.js"></script>
+  </body>
+</html>

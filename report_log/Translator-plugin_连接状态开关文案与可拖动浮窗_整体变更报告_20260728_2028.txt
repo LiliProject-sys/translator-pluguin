@@ -1,0 +1,266 @@
+Orange翻译 连接状态、开关文案与可拖动浮窗整体变更报告
+
+1. 本轮基本信息
+
+项目目录：D:\Project_Experimental\Translator_Plugin
+当前分支：feat/gateway-beta
+本轮目标：优化设置页连接状态提示、Popup 自动翻译开关文案与颜色、划词浮窗拖动体验。
+本轮不涉及：Gateway、Cloud Run、Provider、Prompt、请求协议、response schema、Word Analysis、Sentence Translation、中文过滤、生词本数据结构、API Key、Token。
+
+2. 修改前的问题
+
+设置页中，Gateway 测试访问码验证成功后当前页面会显示“已连接，可以开始使用”，但重新打开设置页时只显示“已保存测试访问码”，不会恢复 gatewayStatus 的“已连接”提示，容易让用户误以为访问码丢失。
+
+Popup 中，“划词自动翻译”开关只显示“开启 / 关闭”，语义可能被理解为点击后的动作，不够明确。
+
+划词浮窗固定跟随选区附近出现，长译文或详细解释返回后可能遮挡正文。已有 resize 能调整大小，但不能把浮窗移动到用户希望的位置。
+
+3. 修改后的用户行为
+
+设置页重新打开后，如果本地保存了曾经验证成功的 Gateway 测试访问码，会恢复显示“已连接，可以开始使用”。设置页初始化不主动请求 Gateway。
+
+Popup 自动翻译开关现在显示“当前已开启”或“当前已关闭”。开启态使用橙色强调，关闭态继续保持中性样式。
+
+划词浮窗顶部新增六点拖动手柄。未拖动时仍靠近选区出现；用户拖动后，同一 content script 页面会话内继续划词、关闭后再次打开、翻译结果返回、错误状态、Detail 展开和内容尺寸变化时，浮窗都保持用户拖动后的位置并做视口边界校正。页面刷新、导航或标签页关闭后自然重置。
+
+4. 设置页连接状态恢复方案
+
+实际 storage key：translationSettings
+实际访问码字段：translationSettings.gatewayAccessToken
+
+代码检查确认，当前唯一主动写入 gatewayAccessToken 的用户路径是 options.js 中的 verifyGatewayAccessToken()。该函数先向 background 发送 TEST_LANGUAGE_PROVIDER，并由 Gateway Provider 调用验证接口；只有 response.status === "ok" 后才调用 writeSettings() 保存 gatewayAccessToken 和 provider: "gateway"。
+
+因此本轮没有新增 verified 布尔字段，而是复用现有真实状态：gatewayAccessToken 非空表示本地保存了曾经验证成功的配置。该状态不代表每次打开设置页都实时连通 Gateway。
+
+5. 新访问码验证失败时的处理
+
+无旧连接时：
+输入错误访问码并验证失败，不保存 token，不显示“已连接”，显示 Gateway 返回的错误文案或“测试访问码无效”。
+
+有旧连接时：
+输入新的错误访问码并验证失败，不覆盖旧 token，storage 中仍保留旧 gatewayAccessToken，页面显示“新访问码验证失败，原有连接仍可使用”。重新打开设置页后，会根据旧 token 恢复“已连接，可以开始使用”。
+
+页面不会回显完整访问码，也不会把访问码写入日志。
+
+6. 自动翻译开关文案与颜色
+
+修改前：
+开启
+关闭
+
+修改后：
+当前已开启
+当前已关闭
+
+#F3AF64 的实际应用：
+.auto-translate-switch[aria-checked="true"] {
+  border-color: #F3AF64;
+  background: #F3AF64;
+  color: #3f2a12;
+}
+
+文字颜色使用深色 #3f2a12，避免浅橙色背景上使用白色或浅色文字导致可读性下降。关闭态仍使用中性色。打开生词本按钮、设置按钮和其他 Popup 蓝色按钮没有被改色。
+
+为适配更长文案，开关最小宽度改为 88px，并增加 white-space: nowrap，减少换行和挤压风险。
+
+7. 浮窗修改前 DOM、定位和交互
+
+修改前，content.js 使用单个 #translator-plugin-selection-panel 外层 DOM，position: fixed。选区位置来自 Range.getBoundingClientRect()，由 positionSelectionPanel() 根据选区计算 left/top，并写入 currentPanelViewportPosition。
+
+浮窗已有 ResizeObserver，尺寸变化后调用 keepSelectionPanelInViewport()。浮窗内容会通过 selectionPanel.innerHTML = "" 重建，但外层 panel 复用。
+
+8. 拖动手柄 DOM 与样式
+
+新增 DOM：
+button.translator-plugin-panel-drag-handle
+
+手柄位于浮窗顶部、正文内容之前，使用 CSS radial-gradient 显示轻量六点形态，不引入外部图标库或网络资源。
+
+关键样式：
+touch-action: none;
+user-select: none;
+cursor: grab;
+
+拖动中使用 is-dragging class，cursor: grabbing。
+
+9. 实际修改的函数、状态变量和事件
+
+新增状态：
+FLOATING_PANEL_DRAG_THRESHOLD = 3
+hasUserPanelPosition
+isPanelDragging
+panelDragState
+suppressNextPanelDragClick
+
+新增或调整函数：
+startPanelDrag(event)
+movePanelDrag(event)
+endPanelDrag(event)
+handlePanelDragClick(event)
+clampPanelViewportPosition(left, top, width, height)
+positionSelectionPanel(selectionRect)
+keepSelectionPanelInViewport()
+closeSelectionPanel()
+
+Pointer Events：
+pointerdown
+pointermove
+pointerup
+pointercancel
+lostpointercapture
+
+pointerdown 调用 setPointerCapture(event.pointerId)。pointerup、pointercancel 和 lostpointercapture 都会清理拖动状态和事件监听。拖动逻辑不发送 TRANSLATE_TEXT，不改变 currentSelectionId，不取消正在进行的语言请求。
+
+10. 用户拖动位置的保存范围
+
+保存范围：当前 content script 页面会话内的模块变量。
+
+保持位置：
+同一页面继续划词；
+浮窗关闭后再次划词；
+翻译结果返回；
+错误状态出现；
+Detail 展开；
+生词本状态变化；
+页面滚动；
+用户 resize 浮窗；
+窗口 resize 后校正。
+
+重置条件：
+页面刷新；
+标签页导航导致 content script 重新加载；
+标签页关闭。
+
+坐标不写入 chrome.storage.local 或 chrome.storage.sync。
+
+11. 唯一坐标状态与视口边界算法
+
+本轮只保留一套坐标来源：
+currentPanelViewportPosition
+
+hasUserPanelPosition 只表示当前坐标是否由用户拖动决定；isPanelDragging 只表示当前是否正在拖动。
+
+未拖动时：
+positionSelectionPanel() 按选区计算 currentPanelViewportPosition。
+
+已拖动后：
+positionSelectionPanel() 不再根据新选区重算位置，而是继续使用 currentPanelViewportPosition，并调用 clampPanelViewportPosition() 做边界校正。
+
+keepSelectionPanelInViewport() 会把校正后的合法坐标写回 currentPanelViewportPosition，再调用 applyPanelViewportPosition()。因此窗口缩小、内容变高、Detail 展开、ResizeObserver 触发后，后续再次划词会保持校正后的新位置，不会回到旧的越界坐标。
+
+12. 拖动阈值与 click 抑制
+
+拖动阈值为 3px。
+
+pointermove 中使用 Math.hypot(deltaX, deltaY) 判断移动距离。超过阈值后视为真实拖动，并设置 suppressNextPanelDragClick。拖动结束后的 click 会被 handlePanelDragClick() 阻止，避免误触发业务动作。
+
+轻点手柄且几乎不移动，不会破坏浮窗。
+
+13. 与 resize、ResizeObserver、重新渲染和 stale response 的兼容
+
+拖动与 resize 互斥：只有顶部手柄启动拖动，正文、按钮、关闭、Detail、保存和原生 resize 区域不会启动拖动。
+
+ResizeObserver 仍监听外层 panel，尺寸变化后继续调用 keepSelectionPanelInViewport()。浮窗内容重建时手柄会重新插入，拖动位置保存在模块变量中，不依赖旧 DOM。
+
+stale response 仍由 currentSelectionId、currentQuickRequestId、currentDetailRequestId 和 snapshot identity 保护。拖动不改变这些请求生命周期字段。
+
+14. 实际修改文件
+
+manifest.json
+options.js
+popup.html
+popup.css
+popup.js
+content.js
+tests/options-gateway-connection-status.test.js
+tests/auto-translate-toggle-and-han-filter.test.js
+tests/gateway-provider.test.js
+tests/stage10-floating-panel-interaction.test.js
+tests/stage11-floating-panel-resize.test.js
+tests/stage6 至 stage18.2 相关测试中的 manifest 版本断言
+
+15. manifest 版本
+
+修改前：1.0.2
+修改后：1.0.3
+
+只修改 version 字段。未修改 manifest_version、permissions、host_permissions、background、content_scripts、options_ui、action popup 或 Gateway 配置。
+
+16. 自动测试命令与结果
+
+已执行：
+node -e "JSON.parse(...manifest.json...)"
+结果：通过，manifest-json-ok 1.0.3
+
+已执行：
+递归 node --check 项目 JS，排除 release、dist、WPS、缓存、虚拟环境等目录。
+结果：通过，js-syntax-ok 34
+
+已执行：
+tests/*.test.js 全量 Node 测试
+结果：通过，all-node-tests-ok 21
+
+已执行：
+git diff --check
+结果：通过。Git 仅提示 LF 将在下次 Git 处理时替换为 CRLF，未发现 whitespace error。
+
+17. 用户仍需完成的 GUI 验收
+
+尚未进行 Chrome/Edge 人工 GUI 验收。需要用户验证：
+
+设置页：
+输入并验证访问码后显示“已连接”；
+关闭并重新打开设置页后仍显示“已连接”；
+输入错误新访问码时不覆盖旧连接；
+页面不显示完整访问码。
+
+Popup：
+开启时显示“当前已开启”；
+关闭时显示“当前已关闭”；
+开启态为 #F3AF64；
+文案不换行、不溢出。
+
+浮窗：
+未拖动时靠近选区；
+拖动到侧边后继续划词仍保持位置；
+翻译结果返回后位置不跳；
+关闭后再次划词位置保持；
+滚动页面时保持视口位置；
+窗口缩小时仍可抓取和关闭；
+resize 与拖动互不冲突；
+刷新页面后恢复默认跟随选区。
+
+18. 是否修改 Gateway / Cloud Run / 协议
+
+未修改 Gateway。
+未修改 Cloud Run。
+未修改 Provider。
+未修改 Prompt。
+未修改请求协议或 response schema。
+未修改 Word Analysis 或 Sentence Translation。
+未修改中文过滤、生词本数据结构、API Key 或 Token。
+不需要重新部署 Cloud Run。
+
+19. Git 状态与历史未提交改动边界
+
+本轮未执行 git add、git commit、git push。
+
+工作区仍存在此前历史遗留未跟踪内容，例如 release、WPS、plan_log、未纳入报告、未引用图标和 tools 目录。本轮未清理、未回滚、未删除这些内容。
+
+20. 未完成项、风险和后续建议
+
+未完成项：
+Chrome/Edge GUI 验收尚未执行。
+本轮未重新生成朋友测试包。
+
+风险：
+不同网页可能有强 CSS 或事件环境，但浮窗样式使用高优先级 id 选择器和独立 class，风险较低。
+Pointer Capture 在主流 Chrome/Edge 支持良好；若用户在特殊页面发现拖动异常，可再补浏览器实测修复。
+
+后续建议：
+GUI 验收通过后，再考虑重新生成朋友测试包。
+如果拖动体验稳定，后续可考虑增加“回到选区附近”按钮，但本轮未实现。
+
+21. 给 ChatGPT 的快速上下文
+
+本轮从 Orange翻译 v1.0.2 升级到 v1.0.3。核心变更是：options 页面根据已保存且曾验证成功的 translationSettings.gatewayAccessToken 恢复“已连接”；popup 自动翻译开关文案改为“当前已开启/当前已关闭”，开启态背景和边框使用 #F3AF64；content.js 浮窗新增六点手柄拖动，位置只保存在 currentPanelViewportPosition，并用 hasUserPanelPosition 标记是否由用户拖动决定。拖动使用 Pointer Events、setPointerCapture、pointerup/pointercancel/lostpointercapture 清理、3px 阈值和 click 抑制。全量 JS 语法和 21 个 Node 测试已通过，未执行 GUI 验收，未提交或推送。

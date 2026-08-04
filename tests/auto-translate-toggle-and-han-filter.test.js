@@ -10,7 +10,7 @@ const popupJs = fs.readFileSync(path.join(projectRoot, "popup.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "1.0.2");
+assert.equal(manifest.version, "1.0.4");
 assert(manifest.permissions.includes("storage"));
 
 assert(content.includes('const AUTO_TRANSLATE_KEY = "autoTranslateEnabled";'));
@@ -68,12 +68,20 @@ assert(popupHtml.includes("autoTranslateToggle"));
 assert(popupHtml.includes('role="switch"'));
 assert(popupHtml.includes('aria-checked="true"'));
 assert(popupHtml.includes("划词自动翻译"));
+assert(popupHtml.includes("当前已开启"));
 assert(popupHtml.indexOf("autoTranslateToggle") < popupHtml.indexOf("openVocabularyButton"));
 
 assert(popupCss.includes(".auto-translate-row"));
 assert(popupCss.includes(".auto-translate-switch[aria-checked=\"true\"]"));
 assert(popupCss.includes(".auto-translate-switch[aria-checked=\"false\"]"));
 assert(popupCss.includes(".popup-status"));
+assert(popupCss.includes("min-width: 88px;"));
+assert(popupCss.includes("white-space: nowrap;"));
+assert(popupCss.includes("border-color: #F3AF64;"));
+assert(popupCss.includes("background: #F3AF64;"));
+assert(popupCss.includes("color: #3f2a12;"));
+assert(popupCss.includes(".open-vocabulary-button"));
+assert(popupCss.includes("border-color: #2563eb;"));
 
 assert(popupJs.includes('const AUTO_TRANSLATE_KEY = "autoTranslateEnabled";'));
 assert(popupJs.includes("renderAutoTranslateSetting();"));
@@ -86,7 +94,7 @@ assert(popupJs.includes("autoTranslateEnabled = previousValue;"));
 assert(popupJs.includes("updateAutoTranslateToggle(previousValue);"));
 assert(popupJs.includes('showAutoTranslateStatus("保存失败，请重试")'));
 assert(popupJs.includes('autoTranslateToggle.setAttribute("aria-checked", enabled ? "true" : "false")'));
-assert(popupJs.includes('autoTranslateToggle.textContent = enabled ? "开启" : "关闭";'));
+assert(popupJs.includes('autoTranslateToggle.textContent = enabled ? "当前已开启" : "当前已关闭";'));
 assert(popupJs.includes("return value === undefined ? true : value !== false;"));
 
 console.log("auto-translate-toggle-and-han-filter-tests-ok");

@@ -1,0 +1,166 @@
+Orange翻译 DeepSeek V4 Flash Gateway 过渡接入与对比测试整体变更报告
+
+一、本轮基本信息
+
+项目目录：D:\Project_Experimental\Translator_Plugin
+分支：feat/gateway-beta
+实施前 HEAD：4ecfda5d64bde8b3ee103da855c27fcd2f2e62aa
+浏览器 manifest 当前工作区版本：1.0.4
+实施目标：完成第一阶段 B 方案，使 Gateway 可通过服务端配置统一选择 Gemini 或 DeepSeek V4 Flash。
+
+本轮未执行 git add、git commit 或 git push。当前工作区原本已有多轮未提交修改，本轮没有清理、回滚或覆盖这些历史改动。
+
+二、实际架构
+
+浏览器请求协议保持不变：
+
+content.js
+→ gateway-language-provider.js
+→ POST /v1/language
+→ Gateway language_service
+→ 现有 Word Analysis 或 Sentence Translation Skill
+→ get_upstream_client(provider_id)
+→ GeminiClient 或 DeepSeekClient
+→ 现有 Pydantic Schema
+→ 原有 Gateway response envelope
+
+GATEWAY_UPSTREAM_PROVIDER 只允许 gemini 或 deepseek，缺失时默认 gemini。Provider 选择集中在 gateway/app/upstream.py，没有散落到 Skill 或 endpoint 中。
+
+三、实际修改文件
+
+新增：
+- gateway/app/deepseek_client.py
+- gateway/app/upstream.py
+- gateway/app/language_service.py
+- gateway/compare_upstreams.py
+- gateway/tests/test_deepseek_client.py
+
+修改：
+- gateway/app/config.py
+- gateway/app/gemini_client.py
+- gateway/app/main.py
+- gateway/tests/test_gateway_contract.py
+- gateway/.env.example
+- gateway/README.txt
+- gateway/启动本地网关.ps1
+- README.md
+
+浏览器端 content、Gateway payload、options、storage、Provider 选择 UI、Word/Sentence Skill 和 Pydantic Schema均未因本轮接入而修改。manifest.json 也未因本轮升级版本；其当前 1.0.4 变化属于实施前已存在的工作区改动。
+
+四、DeepSeek 请求参数
+
+Base URL：https://api.deepseek.com
+Endpoint：POST /chat/completions
+Model alias：deepseek-v4-flash
+thinking：disabled
+response_format：json_object
+stream：false
+temperature：未显式设置
+reasoning_effort：未设置
+
+Authorization 只由服务端运行时注入。代码、报告、测试数据和浏览器响应均不包含真实 Key 或 Authorization 值。
+
+五、max_tokens 最终处理
+
+没有沿用所有请求统一 500 的策略。Gateway 调用层按业务输出结构使用三档上限：
+
+- Word Quick：256
+- Word Detail：512
+- Sentence Translation：8192
+
+Word 输出字段很少，较小上限可防止异常扩展；Sentence Translation 最长可接收 5000 字符目标文本，因此使用更高上限，降低长段落 JSON 被截断的风险。上限集中在 upstream.py，Skill 不承担 Provider 参数。
+
+六、JSON、重试与错误映射
+
+只有 finish_reason=stop 才进入 JSON 解析。length、content_filter、tool_calls、insufficient_system_resource、缺失状态和未知状态均转换为明确错误。
+
+空 content 最多重试一次，两次调用共享同一个总超时截止时间。第二次仍为空返回 UPSTREAM_EMPTY_RESPONSE。Markdown code fence 不会被自动剥离，而是作为非法 JSON 拒绝。JSON 成功解析后仍必须通过原 Pydantic Schema；缺字段、额外字段和非法字段值返回 UPSTREAM_SCHEMA_INVALID。
+
+HTTP 映射：
+- 400/422：UPSTREAM_REQUEST_REJECTED
+- 401/403：UPSTREAM_AUTH_FAILED
+- 402：UPSTREAM_QUOTA_EXHAUSTED
+- 429：UPSTREAM_RATE_LIMITED
+- 5xx：UPSTREAM_UNAVAILABLE
+- timeout：UPSTREAM_TIMEOUT
+- DNS/连接失败：UPSTREAM_UNAVAILABLE
+
+选择 DeepSeek 但缺少 DEEPSEEK_API_KEY 时返回 UPSTREAM_NOT_CONFIGURED。Gemini 与 DeepSeek 的 Key 检查互相隔离，未选择的 Provider 不会阻断当前模式。
+
+七、配置与 Secret 边界
+
+新增服务端配置：
+- GATEWAY_UPSTREAM_PROVIDER
+- DEEPSEEK_API_KEY
+- DEEPSEEK_MODEL
+- DEEPSEEK_BASE_URL
+
+Cloud Run Secret 建议名称：translator-deepseek-api-key。本轮没有创建 Secret，也没有写入任何 Secret 值。
+
+本地 gateway/.env 继续保持 Git ignored；.env.example 只包含 example 占位值。本地启动脚本现在按当前上游只检查对应 API Key。
+
+八、固定样本比较工具
+
+gateway/compare_upstreams.py 复用同一个 language_service、Skill、Prompt、Schema 和两个正式 Adapter，不是孤立的 DeepSeek Demo，也不新增测试 HTTP endpoint。
+
+固定样本覆盖普通单词、一词多义词、专业术语、连字符词、短标题、长难句、学术段落、TARGET 小于 CONTEXT、上下文越界风险、特殊符号和长段落。
+
+输出字段包括 Provider、模型别名、requestType、analysisMode、成功状态、Schema 状态、总耗时、API 可用时的 token usage、可选成本估算、重试次数和规范化结果。非流式请求不记录首字节时间。
+
+本轮只验证了脚本入口和语法，没有调用真实 Gemini 或 DeepSeek API。真实固定样本 A/B、质量结论、速度结论和成本结论均尚未产生。
+
+九、自动测试结果
+
+已执行并通过：
+- Gateway Python 单元测试：22 项通过。
+- 项目 tests/*.test.js：21 个测试文件全部通过。
+- 递归 Python 语法检查：17 个文件通过。
+- 递归 JavaScript 语法检查：34 个文件通过。
+- PowerShell 本地启动脚本解析检查通过。
+- manifest UTF-8 JSON 解析、MV3 和版本 1.0.4 检查通过。
+- git diff --check 通过，仅有现有 LF/CRLF 提示。
+- 候选 Gateway 源码、测试、示例和文档敏感模式扫描未发现真实凭据。
+- compare_upstreams.py --help 入口检查通过。
+
+专项覆盖包括请求 URL/Header/body、DeepSeek 模型与非思考模式、三档输出上限、Word Quick、Word Detail、Sentence Translation、空响应重试、非法 JSON、code fence、Schema 错误、finish_reason、HTTP 错误、超时、网络错误、Key 隔离、工厂选择和 upstreamProvider。
+
+十、未执行事项
+
+- 未调用真实 DeepSeek API。
+- 未调用真实 Gemini API 做本轮 A/B。
+- 未创建或修改 Secret Manager Secret。
+- 未部署 Cloud Run 新 Revision。
+- 未切换 Cloud Run 流量或执行回滚。
+- 未进行浏览器 GUI 验收。
+- 未重新打包朋友测试包。
+- 未执行 Git 暂存、提交或推送。
+
+十一、部署与回滚状态
+
+Cloud Run 部署状态：未部署。
+新 Revision：无。
+回滚动作：未发生。
+
+后续过渡部署应保留现有 Gemini Secret 和旧 Gemini Revision，新增 DeepSeek Secret 后部署 GATEWAY_UPSTREAM_PROVIDER=deepseek 的新 Revision。验证失败时直接把流量切回旧 Gemini Revision。
+
+十二、版本和兼容性
+
+浏览器 manifest 保持当前工作区版本 1.0.4，本轮没有因服务端 Adapter 接入递增版本。Word Skill 仍为 context-analysis-v6，Sentence Skill 仍为 sentence-translation-v1.1。
+
+旧扩展协议不变，未来 Cloud Run 部署完成后可直接使用服务端默认上游，无需重新打包扩展。
+
+十三、第二阶段 A 方案
+
+第一阶段完成 DeepSeek 真实验证后，后续确定实施完整 A 方案：保留 translationSettings.provider 的现有服务方式语义，并新增 gatewayUpstreamProvider，让 provider=gateway 的用户在 Gemini 与 DeepSeek V4 Flash 间选择，同时仍不管理上游 Key。
+
+第二阶段还将增加 Gateway 请求 allowlist 字段、服务端默认 Provider、enabled Provider 列表、旧扩展默认回退、前端设置、manifest patch 升级、Cloud Run 新 Revision 和朋友测试包。第二阶段尚未实施。
+
+十四、实际设计取舍
+
+本轮采用一个受控两值工厂、一个公共业务处理函数和两个同签名 Adapter。没有实现动态插件发现、复杂依赖注入、多层抽象基类、新日志框架或任意 Provider 配置系统。
+
+该结构已满足当前 Gemini/DeepSeek 双上游、Skill/Schema 复用、错误区分、测试和回滚要求，并为第二阶段按请求选择保留直接入口。目标是够完善、容易验证和容易回滚，不追求超出当前需求的通用化。
+
+十五、给 ChatGPT 的快速上下文
+
+Orange翻译 Gateway 第一阶段 B 方案的代码已完成：服务端可通过 GATEWAY_UPSTREAM_PROVIDER 在 Gemini 和 DeepSeek V4 Flash 间统一切换；浏览器协议、manifest 和 Skill 均未改。所有 mock 自动测试和静态检查通过，但真实 API A/B、Cloud Run Secret、Revision 部署、流量切换和 GUI 验收均未执行。下一步应由用户安全配置本地 DeepSeek Key，运行固定样本比较并确认质量，再决定是否部署 DeepSeek 过渡 Revision。验证通过后进入已确定的第二阶段前端模型选择 A 方案。

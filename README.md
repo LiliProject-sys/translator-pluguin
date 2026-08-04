@@ -57,7 +57,7 @@ Orange翻译 Chrome 版核心功能已基本完善，达到可供真实用户日
 
 ## 文件结构
 
-- `gateway/`：本地 FastAPI Gateway、固定服务端 Skill、Gemini 调用、合同 fixture、Dockerfile 和测试。
+- `gateway/`：本地 FastAPI Gateway、固定服务端 Skill、Gemini/DeepSeek 上游 Adapter、合同 fixture、Dockerfile 和测试。
 - `gateway-language-provider.js`：Chrome 插件侧 Gateway Provider，固定本地 Gateway URL、Bearer Token、Envelope 解包和取消请求。
 - `manifest.json`：Manifest V3、权限、service worker、content script、popup 和设置页。
 - `background.js`：右键菜单、状态查询、统一语言处理、保存去重和设置页消息。
@@ -445,7 +445,7 @@ Stage13 的翻译目标与上下文已经明确分离：`text / targetText` 是�
 
 - Gateway Beta Token 只通过 `Authorization: Bearer <Token>` 发送，不放入业务 JSON body。真实 Token、Gemini API Key 和 `gateway/.env` 不应提交到 Git。
 - Gateway 语言请求只发送白名单字段：`requestId`、`requestType`、`analysisMode`、`sourceLanguage`、`targetLanguage`、`text`、`contextSentence` 和可选 `pageTitle`。不发送 `pageUrl`、整页正文、`userQuestion`、Prompt、模型名、Provider 偏好或本地 API Key。
-- Gateway Beta 当前固定 Cloud Run 地址 `https://translator-gateway-beta-268073468344.asia-northeast1.run.app`，普通用户设置页不显示也不编辑 Gateway URL。普通用户不需要自带 Gemini API Key；Gateway 服务端使用 Secret Manager 中的 Gemini API Key 调用 Gemini。远程 Beta 完成人工验收前，不将 manifest 版本升级到 `1.1.0`。
+- Gateway Beta 当前固定 Cloud Run 地址 `https://translator-gateway-beta-268073468344.asia-northeast1.run.app`，普通用户设置页不显示也不编辑 Gateway URL。普通用户不需要自带上游 API Key；Gateway 第一阶段可通过服务端 `GATEWAY_UPSTREAM_PROVIDER` 在 Gemini 与 DeepSeek V4 Flash 之间统一切换，Key 仅由 Secret Manager 注入。浏览器按请求选择 Gateway 上游模型属于后续第二阶段，当前请求协议不变。
 - 百度密钥、DeepSeek API Key 和 Gemini API Key 不硬编码在源码中，也不会发送给 content script。
 - Service Worker 控制台只记录 Provider、HTTP 状态、内部错误码、requestId 及经过脱敏和截断的 API 错误信息；不记录凭据、请求头、选词、完整上下文、请求体或完整服务响应。
 - `chrome.storage.local` 不是加密保险箱。本实现适合个人本机 Demo，不适合共享电脑或把统一密钥打包公开发布。

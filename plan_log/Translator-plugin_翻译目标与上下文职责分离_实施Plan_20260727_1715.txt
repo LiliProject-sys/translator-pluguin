@@ -1,0 +1,863 @@
+Translator-plugin 翻译目标与上下文职责分离实施 Plan
+生成时间：2026-07-27 17:15
+
+本轮性质
+
+本轮只做代码审计、问题定位和实施规划。
+本轮未修改功能代码，未执行 git add / commit / push，未重新打包，未修改 Cloud Run 配置，未部署 Gateway。
+
+项目路径
+
+D:\Project_Experimental\Translator_Plugin
+
+1. 当前代码事实与完整数据流
+
+1.1 Git 与工作区状态
+
+当前分支：
+feat/gateway-beta
+
+当前 HEAD：
+06804a22d02ffe62fd714aaae1d50ff01ababb14
+
+当前工作区已有多轮未提交改动：
+- PRIVACY.md
+- README.md
+- content.js
+- gateway-language-provider.js
+- gateway/README.txt
+- manifest.json
+- popup.css
+- popup.html
+- popup.js
+- tests/gateway-provider.test.js
+- tests/stage10-floating-panel-interaction.test.js
+- tests/stage13-sentence-translation.test.js
+- tests/stage18_2-sentence-boundary-heuristic.test.js
+- tests/auto-translate-toggle-and-han-filter.test.js
+- report_log 下多份 Gateway / Plan / 变更报告
+- Translator_Plugin_Releases/
+- Translator_Plugin_WPS_Addin/
+- tools/
+
+git diff --stat 当前显示 13 个已跟踪文件有修改，主要来自 Gateway、自动翻译开关、中文过滤、多词标题判断修复和相关测试。
+本轮后续实现时必须只归因本轮真实修改，不得清理、回滚或覆盖这些历史改动。
+
+1.2 浏览器 Selection 到 content.js snapshot
+
+真实入口：
+content.js
+
+相关函数：
+- getSelectionContext()
+- showPanelForCurrentSelection()
+- requestTranslation(selectionId)
+- renderSentenceTranslation(container, result)
+
+content.js 中 getSelectionContext() 当前做法：
+- selectedText = window.getSelection().toString().trim()
+- nearbyText = getNearbyText(range)
+- contextSentence = extractSentence(nearbyText.text, nearbyText.selectionStart, nearbyText.selectionEnd) || selectedText
+- 返回对象：
+  - word: selectedText
+  - contextSentence
+  - pageTitle
+  - pageUrl
+
+回答定位问题 1：
+content.js 中 selectedText 最终保存到 currentSelectionSnapshot.word。
+
+回答定位问题 2：
+自动提取的上下文保存到 currentSelectionSnapshot.contextSentence。
+
+showPanelForCurrentSelection() 当前做法：
+- 先读取 selectedText 和 range rect
+- 经 autoTranslateEnabled 与 containsHanScript(selectedText) 检查
+- currentSelectionSnapshot = getSelectionContext()
+- currentSelectionRequestType = detectSelectionRequestType(currentSelectionSnapshot.word)
+- createOrUpdateSelectionPanel(currentSelectionSnapshot.word)
+- requestTranslation(selectionId)
+
+当前多词短语和短标题判断已改为：
+- currentSelectionSnapshot.word trim 后有内部空白 -> sentenceTranslation
+- 无内部空白 -> wordAnalysis
+
+1.3 content.js 到 background.js 的 TRANSLATE_TEXT message
+
+content.js 的 requestTranslation(selectionId) 当前发送：
+
+type: TRANSLATE_TEXT
+payload:
+- text: snapshot.word
+- contextSentence: snapshot.contextSentence
+- pageTitle: snapshot.pageTitle
+- sourceLanguage: en
+- targetLanguage: zh-CN
+- requestType: currentSelectionRequestType
+- analysisMode: quick
+- requestId: currentQuickRequestId
+- selectionId
+
+回答定位问题 3：
+TRANSLATE_TEXT 中主文本字段是 payload.text，值来自 currentSelectionSnapshot.word，也就是用户实际选区。
+上下文字段是 payload.contextSentence，值来自自动提取的 contextSentence。
+
+1.4 background.js 语言处理入口
+
+真实文件：
+background.js
+
+相关函数：
+- handleLanguageRequest(payload, sendResponse, providerOverride)
+- normalizeRequestType(value)
+
+background.js 中 handleLanguageRequest() 当前做法：
+- text = normalizeText(payload.text)
+- 调用 self.languageService.process({
+    text,
+    contextSentence: normalizeText(payload.contextSentence),
+    pageTitle,
+    sourceLanguage,
+    targetLanguage,
+    requestType,
+    analysisMode,
+    requestId,
+    userQuestion
+  })
+
+回答定位问题 4：
+background.js 没有把 text 替换成 contextSentence，也没有把二者拼接。
+background.js 只是 normalize 后原样把 payload.text 与 payload.contextSentence 分别传给 languageService。
+
+1.5 translation-provider.js 统一调度
+
+真实文件：
+translation-provider.js
+
+相关函数：
+- createConfiguredLanguageProvider()
+- toAiLanguageRequest(request)
+- normalizeLanguageRequest(request)
+- normalizeProviderResult(result)
+
+normalizeLanguageRequest() 当前把 request.text 或 request.targetText 规范化为 text，并保留 contextSentence。
+
+Gateway provider 分支：
+- providerRegistry.gateway.execute(request, processOptions) 调用 gatewayProvider.process(request, processOptions)
+- 不转换为 targetText；仍使用 text/contextSentence。
+
+Gemini / DeepSeek 本地 Provider 分支：
+- toAiLanguageRequest(request) 返回：
+  - targetText: request.text
+  - contextSentence: request.contextSentence
+  - pageTitle
+  - requestType
+  - analysisMode
+
+回答定位问题 5：
+Gateway Provider 实际把 request.text 作为主文本字段发送给 Cloud Run。
+本地 Gemini/DeepSeek Provider 将 request.text 映射为 targetText，将 request.contextSentence 保留为 contextSentence。
+
+1.6 gateway-language-provider.js 到 Cloud Run
+
+真实文件：
+gateway-language-provider.js
+
+相关函数：
+- createLanguageBody(request, requestId)
+- readLanguageResponse(response, requestId)
+
+createLanguageBody() 当前生成 Cloud Run body：
+- requestId
+- requestType
+- analysisMode
+- sourceLanguage
+- targetLanguage
+- text
+- contextSentence
+- pageTitle
+
+它限制 text 最大 5000，contextSentence 最大 5000，pageTitle 最大 300。
+
+结论：
+Gateway Provider 没有把 contextSentence 替换为 text，也没有把二者拼接。
+
+1.7 Cloud Run Gateway schema 与路由
+
+真实文件：
+- gateway/app/schemas.py
+- gateway/app/main.py
+
+LanguageRequest 字段：
+- requestId
+- requestType: wordAnalysis | sentenceTranslation
+- analysisMode: quick | detail
+- sourceLanguage
+- targetLanguage
+- text
+- contextSentence
+- pageTitle
+
+LanguageRequest.context_or_text() 当前返回：
+contextSentence or text
+
+gateway/app/main.py 中 /v1/language：
+- wordAnalysis -> word_analysis.build_prompt(payload)
+- sentenceTranslation + quick -> sentence_translation.build_prompt(payload)
+
+回答定位问题 6：
+Cloud Run 请求模型里同时存在 text 和 contextSentence。
+text 是必填主字段，contextSentence 是可选辅助字段。
+
+1.8 Cloud Run Sentence Translation Skill Prompt
+
+真实文件：
+gateway/app/skills/sentence_translation.py
+
+相关函数：
+- build_prompt(request)
+- get_schema_model()
+
+当前 build_prompt()：
+system:
+- 你是一名英语辅助翻译助手。只返回 JSON。
+- Return exactly translation and keyTerm...
+- Do not provide IPA, part of speech, comparison, word analysis, Markdown, or extra explanation.
+
+user:
+- targetText: request.text
+- contextSentence: request.context_or_text()
+- pageTitle
+- sourceLanguage
+- targetLanguage
+
+回答定位问题 7：
+当前 Prompt 用 user JSON 字段 targetText 表示要翻译的文本，用 contextSentence 表示上下文。
+但 system 中没有明确说明 targetText 是唯一翻译目标，也没有说明 contextSentence 只能辅助理解。
+
+回答定位问题 8：
+当前 Prompt 没有明确分区 TARGET TEXT 与 CONTEXT。
+
+回答定位问题 9：
+当前 Prompt 可能让模型把 contextSentence 一并翻译。
+原因是 user JSON 里有 targetText 与 contextSentence 两个自然语言字段，而 system 只说“翻译英文句子或段落”，没有硬性约束“只翻译 targetText，不输出 contextSentence 额外内容”。
+
+1.9 本地 sentence-translation-skill.js
+
+真实文件：
+sentence-translation-skill.js
+
+相关函数：
+- buildInput(rawInput)
+- validateTranslation(rawResult)
+
+buildInput() 当前返回：
+- targetText
+- contextSentence: normalizeText(input.contextSentence) || targetText
+- pageTitle
+- sourceLanguage
+- targetLanguage
+
+instructions 当前强调：
+- 快速理解英文句子或段落
+- 准确、自然中文翻译
+- 关键术语解释
+- 不做语法分析、背景介绍、近义词比较、写作建议
+- 严格 JSON
+
+但同样没有明确：
+- targetText 是唯一翻译对象
+- contextSentence 只能帮助理解
+- 不得输出 targetText 之外的标题、编号、前后句或相邻段落内容
+
+1.10 本地 Gemini / DeepSeek Provider Prompt
+
+真实文件：
+- gemini-context-provider.js
+- deepseek-context-provider.js
+
+Gemini：
+- createModeInstructions(skill, analysisMode, requestType)
+- sentenceTranslation 时拼接 skill.instructions 与 JSON 规则
+- createModeInput(input, analysisMode, requestType)
+- sentenceTranslation 时直接 return input
+
+DeepSeek：
+- createRequestBody(input, model, skill, analysisMode, requestType)
+- sentenceTranslation 时 system 使用 skill.instructions + jsonRules
+- user content 是 JSON.stringify(skill.buildInput(input))
+
+两者同样没有明确 TARGET TEXT / CONTEXT 边界。
+
+1.11 response validator / normalizer
+
+真实文件：
+- translation-provider.js
+- sentence-translation-skill.js
+- gateway/app/schemas.py
+
+translation-provider.js 的 normalizeProviderResult()：
+- resultType === sentenceTranslation 时调用 sentenceTranslationSkill.validateTranslation()
+- 只校验 translation 与 keyTerm 字段存在、非空、无 Markdown
+- 不会把 contextSentence 合并进 translation。
+
+sentence-translation-skill.js validateTranslation()：
+- 只接收 rawResult.translation 和 rawResult.keyTerm
+- 不合并上下文。
+
+gateway/app/schemas.py 的 SentenceTranslation：
+- 只要求 translation 和 keyTerm。
+- 不合并上下文。
+
+回答定位问题 10：
+validator / normalizer 不会把 context 内容合并到 translation 字段。
+
+1.12 前端浮窗渲染
+
+真实文件：
+content.js
+
+相关函数：
+- renderLanguageResult(result, selectionId)
+- renderSentenceTranslation(container, result)
+
+renderLanguageResult()：
+- result.resultType === sentenceTranslation && result.translation 时，调用 renderSentenceTranslation()
+
+renderSentenceTranslation()：
+- translationElement.textContent = result.translation
+- 可选显示 result.keyTerm
+
+回答定位问题 11：
+前端浮窗实际渲染 response.translation。
+前端没有把 contextSentence 拼到显示结果中。
+
+2. 根因定位
+
+当前证据显示：
+- content.js 正确把用户选区放入 payload.text。
+- content.js 正确把自动上下文放入 payload.contextSentence。
+- background.js 没有替换或拼接 text/contextSentence。
+- gateway-language-provider.js 没有替换或拼接 text/contextSentence。
+- Cloud Run schema 同时保留 text 和 contextSentence。
+- 前端渲染只显示 response.translation。
+- validator / normalizer 不会合并 context。
+
+因此当前 bug 最可能发生在 Prompt 语义层：
+- sentenceTranslation Prompt 没有明确冻结 text/targetText 是唯一翻译目标。
+- contextSentence 作为辅助上下文存在，但 Prompt 未明确禁止翻译、复述、总结或输出 targetText 之外的上下文内容。
+- 当 targetText 是短标题，例如 Definition of LLM Agent，而 contextSentence 包含标题编号和下方正文时，模型可能把 contextSentence 理解为也需要翻译的输入材料。
+
+回答定位问题 12：
+当前 bug 最可能发生在 Gateway 的 sentence_translation.build_prompt()，以及本地 sentence-translation-skill.js / Gemini / DeepSeek Prompt 的同类语义约束不足。
+
+回答定位问题 13：
+可以用测试稳定复现“请求构造层没有混字段”和“Prompt 是否包含强约束”。
+模型真实输出越界本身不适合依赖外部 API 做稳定自动化，但可以通过固定 Mock 响应和 Prompt 文本断言覆盖防线。
+
+回答定位问题 14：
+优先不改公开协议。
+现有 text/contextSentence 字段语义足够，采用方案 A：
+- text -> TARGET TEXT / selectedText / 唯一主目标
+- contextSentence -> CONTEXT / 辅助语境
+主要修 Prompt 与测试。
+不建议在本轮新增 targetText/contextText 字段，除非实现时发现 Cloud Run schema 或 Provider 约束无法表达该语义。
+
+3. 冻结后的产品规则
+
+核心规则：
+用户实际选中的文本始终是唯一的分析或翻译目标；自动提取的上下文只能帮助理解，不能扩大输出范围。
+
+字段职责：
+- text / targetText / currentSelectionSnapshot.word：唯一主目标。
+- contextSentence：辅助语境。
+
+wordAnalysis：
+- text / targetText 是要分析的单词或连续词项。
+- contextSentence 只用于判断该词在当前句子中的含义。
+- 输出必须只解释 targetText。
+
+sentenceTranslation：
+- text / targetText 是唯一翻译对象。
+- contextSentence 只用于术语消歧、指代消解、风格判断和理解背景。
+- 即使 contextSentence 包含标题编号、前一句、后一句、整段正文或相邻章节内容，也不得把超出 text / targetText 的内容加入译文。
+
+4. 文件级修改计划
+
+4.1 content.js
+
+原则：
+优先不改逻辑。
+
+当前 content.js 已经正确发送：
+- text: snapshot.word
+- contextSentence: snapshot.contextSentence
+
+实现阶段只建议增加或更新测试断言，不建议改 content.js 运行时代码。
+除非后续测试发现 selectedText 在某些路径被覆盖，否则不要修改 selection、context 提取、autoTranslateEnabled、中文过滤、selectionIntentId、stale response 或浮窗 UI。
+
+4.2 background.js
+
+原则：
+优先不改逻辑。
+
+当前 handleLanguageRequest() 保留 text/contextSentence。
+实现阶段可以新增静态测试确认：
+- handleLanguageRequest 传入 languageService.process 的 text 来自 payload.text。
+- contextSentence 来自 payload.contextSentence。
+- 不出现 text: payload.contextSentence 或文本拼接。
+
+4.3 gateway-language-provider.js
+
+原则：
+优先不改协议。
+
+当前 createLanguageBody() 已经发送：
+- text
+- contextSentence
+
+建议新增测试：
+- sentenceTranslation 请求中 captured.body.text === selectedText。
+- captured.body.contextSentence === 自动上下文。
+- 不把 contextSentence 拼到 text。
+- 不把 text 替换为 contextSentence。
+
+如果要增强可读性，可在代码注释中说明：
+- text 是 target text。
+- contextSentence 是 context only。
+但本轮功能修复重点不需要协议字段改名。
+
+4.4 gateway/app/skills/sentence_translation.py
+
+这是本轮核心修改文件。
+
+修改 build_prompt(request) 的 system 文案，增加明确的 TARGET / CONTEXT 约束。
+
+建议语义：
+- request.text 是 TARGET TEXT，是唯一需要翻译的内容。
+- request.contextSentence 是 CONTEXT，只能用于理解 TARGET TEXT。
+- 只翻译 TARGET TEXT。
+- 不得翻译、复述、总结或输出 CONTEXT 中超出 TARGET TEXT 的标题、编号、前后句、相邻段落或正文。
+- 即使 CONTEXT 中包含完整句子、章节标题或更多段落，也不得加入 translation。
+- keyTerm 只能来自 TARGET TEXT 中明显阻碍理解的专业术语；如需借助 CONTEXT 消歧，可使用 CONTEXT 判断含义，但不要输出 CONTEXT 中额外术语列表。
+
+建议 user JSON 继续保留现有字段：
+- targetText: request.text
+- contextSentence: request.context_or_text()
+- pageTitle
+- sourceLanguage
+- targetLanguage
+
+如需最小增强，可将 user JSON 字段名改为更明确但仍只在 Gateway 内部 prompt 中使用的结构：
+- TARGET_TEXT: request.text
+- CONTEXT: request.context_or_text()
+
+但若修改字段名会影响测试或 Prompt 兼容性，优先保留 targetText/contextSentence，并在 system 中定义清楚。
+
+4.5 sentence-translation-skill.js
+
+本地 Gemini / DeepSeek Provider 也复用该 Skill。
+
+需要同步修改 instructions：
+- 增加 targetText / contextSentence 职责分离。
+- 明确只翻译 targetText。
+- contextSentence 仅用于理解，不得被翻译、复述或扩展输出。
+- keyTerm 默认 null，只解释 targetText 内真正阻碍理解的一个术语。
+
+保持不变：
+- skillVersion 暂不升级，除非团队决定 Prompt 行为变化必须版本化。
+- outputSchema 不变。
+- validateTranslation 不变。
+- buildInput 字段不变。
+
+关于是否升级 skillVersion：
+本 Plan 建议不升级 manifest 版本。
+Skill Version 是否升级可在实现阶段权衡：
+- 若只做 Prompt 收紧且不改 schema，可保持 sentence-translation-v1，减少缓存和文档波动。
+- 若希望缓存自然隔离旧 Prompt，可升级为 sentence-translation-v1.1，并同步 Gateway、本地 Provider 测试和报告。
+由于 Prompt 变更会影响模型行为，建议实现阶段认真决定；若现有缓存 key 包含 skillVersion，本地 Provider 升级可避免旧缓存复用。
+Gateway 当前无明显客户端缓存 sentenceTranslation 结果，Cloud Run Prompt 更新后部署即可生效。
+
+4.6 gemini-context-provider.js
+
+需要更新 sentenceTranslation 分支的 createModeInstructions()：
+- 在现有 JSON-only 规则上补充“只翻译 TARGET TEXT / targetText”。
+- 明确 contextSentence 是 context only，不得输出其中额外内容。
+- 保持 createModeInput() 不变，sentenceTranslation 继续 return input。
+- 保持 schema、endpoint、鉴权、缓存、取消、错误映射不变。
+
+4.7 deepseek-context-provider.js
+
+需要更新 sentenceTranslation 分支的 jsonRules：
+- 补充与 Gemini/Gateway 一致的 target/context 约束。
+- 保持 createRequestBody() 结构、response_format、max_tokens、错误处理、空 content 重试和缓存不变。
+
+4.8 gateway/app/skills/word_analysis.py
+
+建议轻量补充 wordAnalysis 的 target/context 约束，尤其是 detail prompt：
+- word / targetText 是唯一分析对象。
+- sentence / contextSentence 只用于判断当前义项。
+- 不翻译整句 context。
+
+但本轮用户问题发生在 sentenceTranslation 输出范围错误。
+如果担心扩大范围，可只在 Plan 中保留为次要修复项；实现时优先修 sentenceTranslation。
+
+4.9 ai-context-skill.js
+
+当前 Word Skill 已有“只回答当前划选词汇”的强约束。
+原则上无需修改。
+如果实现阶段要补充字段职责，可只做最小文字加强，不改 Schema。
+
+4.10 tests
+
+必须新增或更新测试文件：
+- tests/stage13-sentence-translation.test.js
+- tests/gateway-provider.test.js
+- gateway/tests/test_gateway_contract.py
+
+可新增：
+- tests/target-context-separation.test.js
+或将用例并入现有 Stage13 / Gateway 测试。
+
+建议避免把大量 Gateway Python 细节塞进前端测试；前端、Provider、Gateway、Prompt 分层测试更清楚。
+
+4.11 README.md
+
+实现后最小更新：
+- Sentence Translation 只翻译用户选中的 text / targetText。
+- contextSentence 只用于术语消歧和指代理解。
+- 不会把相邻标题、前后句或下方正文纳入译文。
+- 仍不重新设计上下文提取算法。
+
+5. 前端 / Gateway / Skill 职责分离
+
+前端 content.js：
+- 负责采集 selectedText 和 contextSentence。
+- selectedText 存入 snapshot.word。
+- contextSentence 存入 snapshot.contextSentence。
+- 发送 TRANSLATE_TEXT 时 text = snapshot.word，contextSentence = snapshot.contextSentence。
+
+background.js：
+- 负责校验 text 非空、转发给 languageService。
+- 不改变 text/contextSentence 语义。
+
+gateway-language-provider.js：
+- 负责把 text/contextSentence 放入 Gateway 请求 body。
+- text 是 TARGET TEXT。
+- contextSentence 是 CONTEXT。
+
+gateway/app/schemas.py：
+- 保持现有 LanguageRequest 字段。
+- 不新增 targetText/contextText，避免协议升级。
+
+gateway/app/skills/sentence_translation.py：
+- 负责把 text/contextSentence 的职责写清楚。
+- Prompt 决定模型输出行为，必须明确“只翻译 text/targetText”。
+
+本地 sentence-translation-skill.js：
+- 与 Gateway Skill 语义保持一致。
+- Gemini / DeepSeek 本地 Provider 复用同一行为约束。
+
+validator / normalizer：
+- 只验证结构，不做语义裁剪。
+- 不应尝试用后处理截断译文，因为模型输出是否包含 context 翻译无法可靠规则化判断。
+
+6. 测试计划
+
+6.1 前端消息层测试
+
+模拟：
+selectedText:
+Definition of LLM Agent
+
+contextSentence:
+2.1 Definition of LLM Agent
+LLM technology continues to advance...
+
+断言：
+- TRANSLATE_TEXT.payload.text === "Definition of LLM Agent"
+- TRANSLATE_TEXT.payload.contextSentence 包含下方正文
+- payload.text 没有被 contextSentence 覆盖
+- payload.contextSentence 没有被 text 覆盖
+- payload.requestType === "sentenceTranslation"
+
+建议位置：
+tests/stage13-sentence-translation.test.js 中现有 VM 真实 content.js 链路测试扩展。
+
+6.2 Gateway Provider 层测试
+
+在 tests/gateway-provider.test.js 中新增 sentenceTranslation capture：
+输入：
+- text: Definition of LLM Agent
+- contextSentence: 2.1 Definition of LLM Agent + 下方正文
+- requestType: sentenceTranslation
+- analysisMode: quick
+
+断言：
+- captured.body.text === 选区文本
+- captured.body.contextSentence === 上下文
+- captured.body.text 不包含下方正文
+- captured.body.contextSentence 未丢失
+- body 不包含 userQuestion/pageUrl/providerPreference/API Key
+
+6.3 Cloud Run Gateway Prompt 构造测试
+
+在 gateway/tests/test_gateway_contract.py 或新增测试中直接调用：
+sentence_translation.build_prompt(LanguageRequest(...))
+
+断言：
+- prompt["user"]["targetText"] === 选区文本
+- prompt["user"]["contextSentence"] === 上下文
+- prompt["system"] 包含“只翻译 TARGET TEXT”或等价强约束
+- prompt["system"] 包含“CONTEXT 仅用于辅助理解”或等价强约束
+- prompt["system"] 明确不得输出 CONTEXT 中超出 TARGET TEXT 的标题、编号、前后句、相邻段落或正文
+- prompt["system"] 不要求复述 context
+
+6.4 本地 Gemini / DeepSeek Prompt 测试
+
+更新 tests/stage13-sentence-translation.test.js：
+- Gemini sentenceTranslation system_instruction 包含 target/context 职责分离。
+- DeepSeek sentenceTranslation system message 包含 target/context 职责分离。
+- 两者 prompt 中仍包含 JSON-only 与 keyTerm 规则。
+- 不要求音标、词性、comparison 或 detail 解释。
+
+6.5 响应层测试
+
+使用 Mock Provider 或 fake Gateway response：
+target:
+Definition of LLM Agent
+
+context:
+标题 + 下方正文
+
+返回 translation:
+大语言模型智能体的定义
+
+断言前端只渲染 response.translation。
+
+同时可加一个负向 Prompt 约束测试：
+- 不需要真实调用模型。
+- 通过 system prompt 文本断言，防止未来删除“不得输出 CONTEXT”的规则。
+
+6.6 指代消解场景
+
+Prompt 构造测试或 fake model 测试：
+target:
+These agents exhibit remarkable capabilities.
+
+context:
+An LLM agent is an artificial intelligence system...
+
+预期：
+- 允许 Prompt 说明可以利用 context 理解 These agents。
+- 输出仍只对应 target。
+- 不附带 context 的翻译。
+
+6.7 段落场景
+
+target:
+用户实际选中的完整段落
+
+context:
+章节标题 + 相邻段落
+
+预期：
+- Prompt 约束只翻译 target。
+- 不添加标题或相邻段落。
+
+6.8 wordAnalysis 回归
+
+target:
+agent
+
+context:
+An LLM agent is an artificial intelligence system...
+
+预期：
+- wordAnalysis 仍使用 context 判断当前义项。
+- 只分析 agent。
+- 不翻译整句 context。
+
+建议更新或新增测试：
+- gateway/app/skills/word_analysis.py prompt 中 word/sentence 分离不被破坏。
+- 本地 ai-context-skill.js 不改 Schema。
+
+6.9 现有功能回归
+
+保持并运行：
+- auto-translate-toggle-and-han-filter.test.js
+- stage13-sentence-translation.test.js
+- gateway-provider.test.js
+- gateway/tests/test_gateway_contract.py
+- stage18_1-vocabulary-context-recall.test.js
+- stage10 / stage11 / v1.0.1 浮窗交互测试
+
+7. 人工验收计划
+
+Codex 不得声称已完成浏览器 GUI 验收。
+
+用户后续验证：
+
+标题：
+选中 Definition of LLM Agent
+预期：只翻译标题，不出现下方正文。
+
+正文句子：
+选中 These agents exhibit remarkable capabilities.
+预期：只翻译该句，可借助上文理解 These agents，不附带上文译文。
+
+段落：
+选中一个完整段落
+预期：只翻译该段，不附带章节标题或下一段。
+
+单词：
+选中 agent
+预期：利用所在句子消歧，只显示 agent 的分析。
+
+回归：
+- 中文选区仍静默。
+- 关闭自动翻译仍有效。
+- 多词标题仍进入整体翻译。
+- 生词本与设置仍正常。
+
+8. 本轮不修改项
+
+不修改：
+- sentenceTranslation / wordAnalysis 模式判断。
+- autoTranslateEnabled。
+- 中文过滤。
+- selectionIntentId。
+- DOM context 提取算法。
+- 基于换行截断标题。
+- 基于视觉换行判断。
+- 删除 contextSentence。
+- 引入 tokenizer。
+- Gateway Cloud Run 扩缩容。
+- Gemini API Key。
+- Secret Manager。
+- manifest 版本。
+- Git commit / push。
+- 朋友测试包。
+
+不建议本轮用 \n 截断上下文，因为：
+- 视觉换行未必对应字符串换行。
+- CSS 自动换行没有换行字符。
+- 用户可能真的选中多行标题或多段。
+- 按第一个换行截断会误伤合法选区。
+
+9. 风险与停止条件
+
+风险：
+- 仅修改 Prompt 不能用静态测试 100% 保证模型永不越界，但它是当前证据下最小、最正确的修复点。
+- 如果真实 Cloud Run 未重新部署，Gateway 路径仍会使用旧 Prompt。
+- 本地 Gemini / DeepSeek 与 Gateway 需要同步约束，否则切换 Provider 后表现不一致。
+
+实现阶段停止条件：
+- 发现 content.js 的 selectedText 已经被覆盖为 contextSentence。
+- 发现 Gateway schema 只能接收一个文本字段，无法表达 text/contextSentence。
+- 发现 Skill Prompt 无法区分 target/context。
+- 修复必须改变公开协议。
+- 当前工作区无法安全区分历史修改。
+- 测试无法稳定表达当前字段职责。
+
+10. Git 状态与工作区边界
+
+本轮只生成 Plan TXT。
+
+不要执行：
+- git add
+- git commit
+- git push
+- git reset
+- git checkout
+- git restore
+- git clean
+- merge
+- rebase
+
+本轮 Plan 文件：
+plan_log/Translator-plugin_翻译目标与上下文职责分离_实施Plan_20260727_1715.txt
+
+未来实现可能修改的文件：
+- gateway/app/skills/sentence_translation.py
+- sentence-translation-skill.js
+- gemini-context-provider.js
+- deepseek-context-provider.js
+- tests/stage13-sentence-translation.test.js
+- tests/gateway-provider.test.js
+- gateway/tests/test_gateway_contract.py
+- README.md
+- 可选：gateway/app/skills/word_analysis.py
+- 可选：ai-context-skill.js
+
+自动翻译开关与中文过滤历史改动包括：
+- content.js
+- popup.html
+- popup.css
+- popup.js
+- tests/auto-translate-toggle-and-han-filter.test.js
+- tests/stage10-floating-panel-interaction.test.js
+- tests/stage18_2-sentence-boundary-heuristic.test.js
+- README/report_log 中相关说明
+
+Cloud Run / Gateway 历史改动包括：
+- gateway-language-provider.js
+- gateway/README.txt
+- gateway/app/*
+- tests/gateway-provider.test.js
+- manifest.json
+- PRIVACY.md
+- Gateway 相关 report_log 文件
+
+report / release / WPS 未跟踪内容：
+- report_log 多份历史报告
+- Translator_Plugin_Releases/
+- Translator_Plugin_WPS_Addin/
+- tools/
+
+11. 后续功能代码修改完成后的报告要求
+
+后续功能代码修改完成后，必须生成一份中文 UTF-8 TXT 整体变更报告。
+
+报告必须记录：
+- 修改前行为。
+- 修改后行为。
+- 实际文件和函数。
+- 请求字段与 Prompt 变化。
+- 测试实际结果。
+- 用户仍需人工验收的内容。
+- Git 状态。
+- 未完成项和风险。
+- 给 ChatGPT 的快速上下文。
+
+报告应信息准确、可直接转发给 ChatGPT，不追求复杂排版，不生成多份重复报告。
+
+12. 给 ChatGPT 的快速上下文
+
+当前 bug 不是多词短语模式判断问题。
+多词短语和短标题已经进入 sentenceTranslation。
+
+当前问题是 sentenceTranslation 输出范围错误：
+- 用户只选中标题、句子或段落。
+- content.js 的浮窗标题显示 selectedText 正确。
+- 但模型输出可能包含 contextSentence 中的相邻正文或标题编号。
+
+真实链路审计结论：
+- content.js：selectedText 存在 snapshot.word，context 存在 snapshot.contextSentence。
+- TRANSLATE_TEXT：payload.text 是 snapshot.word，payload.contextSentence 是 snapshot.contextSentence。
+- background.js：没有混字段。
+- gateway-language-provider.js：Cloud Run body 同时发送 text 与 contextSentence，没有拼接。
+- gateway/app/schemas.py：LanguageRequest 同时有 text 和 contextSentence。
+- gateway/app/skills/sentence_translation.py：user JSON 有 targetText/contextSentence，但 system Prompt 没有强约束“只翻译 targetText”。
+- sentence-translation-skill.js、本地 Gemini、DeepSeek Prompt 也缺少同类硬约束。
+- validator / normalizer 不会合并 context。
+- 前端只渲染 response.translation。
+
+最小修复方向：
+不改协议，采用方案 A。
+冻结字段语义：
+- text / targetText = TARGET TEXT = 用户实际选中的唯一处理目标。
+- contextSentence = CONTEXT = 仅辅助理解，不得被翻译、复述、总结或输出。
+
+主要修改 Prompt 与测试。
+如果修改 Cloud Run Gateway 的 Python Skill，需要重新部署 Cloud Run 才会影响 Gateway Beta 真实用户。

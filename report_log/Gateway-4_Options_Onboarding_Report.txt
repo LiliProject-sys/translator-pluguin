@@ -1,0 +1,24 @@
+Gateway-4 Options Onboarding Report
+生成日期：2026-07-23
+编码：UTF-8
+
+阶段目标：
+- 设置页顶部新增欢迎区与测试访问码输入；
+- 复用 TEST_LANGUAGE_PROVIDER 验证候选 Token；
+- 验证成功后才保存 Token 并切换 provider=gateway；
+- 高级 BYOK 设置默认折叠；
+- 首次安装自动打开 options。
+
+变更文件：
+- options.html
+- options.css
+- options.js
+- background.js
+
+实现摘要：
+- 候选 Token 验证前只存在于输入框、runtime message 和本次 /v1/auth/verify 请求。
+- 验证失败不保存错误 Token，不覆盖原有效 Token，不切换 provider，不调用 Gemini。
+- onInstalled 合并右键菜单创建逻辑，仅 install 原因打开 options。
+
+敏感信息：
+- 本报告不含完整 Token。

@@ -1,4 +1,4 @@
-﻿const assert = require("assert");
+const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
@@ -136,7 +136,7 @@ function testUiAndProviderBoundaries() {
   const background = fs.readFileSync(path.join(projectRoot, "background.js"), "utf8");
   const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
-  assert.equal(manifest.version, "1.0.2");
+  assert.equal(manifest.version, "1.0.4");
   assert(content.includes("function detectSelectionRequestType"));
   assert(content.includes('return /\\s/u.test(text) ? "sentenceTranslation" : "wordAnalysis";'));
   assert.equal(content.includes("wordCount > 10"), false);

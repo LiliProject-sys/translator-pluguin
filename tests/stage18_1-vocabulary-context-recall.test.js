@@ -1,4 +1,4 @@
-﻿const assert = require("assert");
+const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
@@ -282,7 +282,7 @@ function testStaticStage18_1Boundaries() {
   const vocabulary = fs.readFileSync(path.join(projectRoot, "vocabulary.js"), "utf8");
   const readme = fs.readFileSync(path.join(projectRoot, "README.md"), "utf8");
 
-  assert.equal(manifest.version, "1.0.2");
+  assert.equal(manifest.version, "1.0.4");
   assert(background.includes("GENERATE_VOCABULARY_CONTEXT_TRANSLATION"));
   assert(background.includes("contextTranslationTasks"));
   assert(background.includes("createVocabularyContextKey"));

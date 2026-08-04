@@ -1,4 +1,4 @@
-﻿const assert = require("assert");
+const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
@@ -9,7 +9,7 @@ const framework = fs.readFileSync(path.join(projectRoot, "translation-provider.j
 const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "1.0.2");
+assert.equal(manifest.version, "1.0.4");
 
 assert.equal(content.includes('window.addEventListener("scroll", closeSelectionPanel'), false);
 assert.equal(content.includes('addEventListener("scroll"'), false);
@@ -19,8 +19,11 @@ assert.equal(content.includes("window.scrollX"), false);
 assert.equal(content.includes("window.pageYOffset"), false);
 assert(content.includes('window.addEventListener("resize", keepSelectionPanelInViewport)'));
 assert(content.includes("currentPanelViewportPosition"));
+assert(content.includes("hasUserPanelPosition"));
+assert(content.includes("isPanelDragging"));
 assert(content.includes("clampPanelCoordinate"));
 assert(content.includes("keepSelectionPanelInViewport();"));
+assert(content.includes("clampPanelViewportPosition"));
 
 assert(content.includes("isEventInsideSelectionPanel(event)"));
 assert(content.includes('typeof event.composedPath === "function"'));
@@ -46,6 +49,22 @@ assert(closeFunction.includes("currentSelectionId += 1"));
 assert(closeFunction.includes("detailAnalysisRequestId += 1"));
 assert(closeFunction.includes("selectionPanel.remove()"));
 assert(closeFunction.includes("cancelLanguageRequests(requestIds)"));
+assert(closeFunction.includes("if (!hasUserPanelPosition)"));
+assert.equal(closeFunction.includes("hasUserPanelPosition = false"), false);
+
+const dragFunctions = content.slice(
+  content.indexOf("function startPanelDrag(event)"),
+  content.indexOf("function saveCurrentSelection(")
+);
+assert(dragFunctions.includes("setPointerCapture(event.pointerId)"));
+assert(dragFunctions.includes('addEventListener("pointerup", endPanelDrag)'));
+assert(dragFunctions.includes('addEventListener("pointercancel", endPanelDrag)'));
+assert(dragFunctions.includes('addEventListener("lostpointercapture", endPanelDrag)'));
+assert.equal(content.includes("suppressNextPanelDragClick"), false);
+assert.equal(content.includes("handlePanelDragClick"), false);
+assert.equal(dragFunctions.includes('type: "TRANSLATE_TEXT"'), false);
+assert.equal(dragFunctions.includes("cancelLanguageRequests"), false);
+assert.equal(dragFunctions.includes("currentSelectionId +="), false);
 
 assert(content.includes("overflow: hidden;"));
 assert(content.includes("overflow: auto;"));

@@ -1,0 +1,26 @@
+Gateway-2 Gemini Server Report
+生成日期：2026-07-23
+编码：UTF-8
+
+阶段目标：
+- 服务端固定使用 gemini-3.1-flash-lite；
+- 新增服务端固定 Skill；
+- 不接受客户端 Prompt、userQuestion 或模型选择；
+- 服务端先做 Schema 校验。
+
+变更文件：
+- gateway/app/gemini_client.py
+- gateway/app/skills/word_analysis.py
+- gateway/app/skills/sentence_translation.py
+- gateway/app/schemas.py
+
+实现摘要：
+- Word Quick 输出 word、lemma、phonetic、partOfSpeech、meaning。
+- Word Detail 输出 meaningInSentence、comparison。
+- Sentence Translation 输出 translation、keyTerm。
+- Gemini 调用超时为 30 秒。
+- 上游错误映射为脱敏错误码与中文消息。
+
+敏感信息：
+- 日志和报告不得记录完整输入、完整 Prompt、完整模型响应、Token 或 API Key。
+- 本阶段未执行真实 Gemini 联调。

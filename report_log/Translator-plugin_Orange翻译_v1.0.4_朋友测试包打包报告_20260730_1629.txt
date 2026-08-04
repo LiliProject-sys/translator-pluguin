@@ -1,0 +1,211 @@
+﻿Orange翻译 v1.0.4 朋友测试包打包报告
+
+1. 当前分支和 HEAD
+
+项目目录：D:\Project_Experimental\Translator_Plugin
+当前分支：feat/gateway-beta
+当前 HEAD：4ecfda5d64bde8b3ee103da855c27fcd2f2e62aa
+
+2. manifest 名称和版本
+
+name：Orange翻译
+short_name：Orange翻译
+manifest_version：3
+version：1.0.4
+action.default_popup：popup.html
+options_ui.page：options.html
+icons：16/32/128 均存在并已验证尺寸。
+
+本轮未修改 manifest 版本，使用当前本地真实版本打包。
+
+3. 使用的打包脚本或命令
+
+检查了现有脚本：
+- scripts/package-extension.ps1：较可移植，但不生成本轮要求的朋友安装说明，输出结构也不是本轮推荐结构。
+- tools\打包朋友测试版.ps1：仍包含旧版本 1.0.1 检查和本地绝对默认输出目录，不适合直接复用。
+
+本轮使用一次性 PowerShell 打包流程，基于 manifest 和实际引用文件建立 allowlist，未修改打包脚本。
+
+4. 是否修改打包脚本
+
+否。未修改 scripts/ 或 tools/ 下的脚本。
+
+5. 最终纳入文件类别
+
+纳入 Chrome/Edge 扩展运行必需文件：
+- manifest.json
+- background.js
+- content.js
+- md5.js
+- ai-context-skill.js
+- sentence-translation-skill.js
+- baidu-translation-provider.js
+- deepseek-context-provider.js
+- gemini-context-provider.js
+- gateway-language-provider.js
+- translation-provider.js
+- popup.html / popup.css / popup.js
+- options.html / options.css / options.js
+- vocabulary.html / vocabulary.css / vocabulary.js
+- icons/16_16.png
+- icons/32_32.png
+- icons/128_128.png
+- 安装与测试说明.txt
+
+6. 明确排除内容
+
+已排除：
+.git / .github / .gitignore / .gitattributes
+gateway/ 服务端目录与 gateway/.env
+所有 .env
+API Key / Gemini Key / OpenAI Key / DeepSeek Key / Beta Token / 测试访问码
+Service Account JSON / 私钥 / Cookie / Session
+node_modules / .venv / __pycache__ / .pytest_cache
+tests / report_log / plan_log
+Codex Prompt TXT
+Translator_Plugin_Releases 旧包
+Translator_Plugin_WPS_Addin / WPS 实验目录
+Cloud Shell 上传副本
+嵌套 ZIP / CRX / 截图 / 视频 / 临时备份 / IDE 配置 / 本地调试日志 / 个人绝对路径配置
+开发报告、研究资料和无关 README
+
+7. 安装包内部结构
+
+ZIP 内部为单一顶层文件夹：
+Orange翻译_v1.0.4_朋友测试版_20260730_1628
+
+朋友解压后进入该文件夹即可看到 manifest.json 和 安装与测试说明.txt。没有多层嵌套。
+
+8. 安装说明内容摘要
+
+安装与测试说明.txt 包含：
+- 解压 ZIP；
+- Chrome 打开 chrome://extensions；
+- Edge 打开 edge://extensions；
+- 开启开发者模式；
+- 加载已解压扩展；
+- 选择能直接看到 manifest.json 的文件夹；
+- 打开 Orange翻译 设置页；
+- 输入用户另行发送的测试访问码；
+- 验证成功后开始使用；
+- 建议固定扩展到工具栏；
+- 建议测试单词、短语/短标题、英文整句、长段落、自动翻译开关、生词本、标题区域拖动浮窗和 resize；
+- 已知限制：浏览器内部页面、网页 PDF、本地 PDF、Edge F9 阅读模式暂不支持；
+- 反馈建议：浏览器版本、测试网页、选中原文、实际结果、截图和等待时间。
+
+说明文件不包含真实访问码、API Key、Token、Secret 或内部部署命令。
+
+9. 源码测试命令和结果
+
+已执行：
+node -e 解析 manifest.json
+结果：manifest-json-ok Orange翻译 1.0.4
+
+已执行：
+递归 node --check 项目运行相关 JS，排除 release、WPS、gateway 服务端、node_modules、缓存和虚拟环境。
+结果：js-syntax-ok 34
+
+已执行：
+tests/*.test.js 全量 Node 测试
+结果：all-node-tests-ok 21
+
+已执行：
+图标尺寸检查
+结果：icons/16_16.png = 16x16；icons/32_32.png = 32x32；icons/128_128.png = 128x128
+
+已执行：
+最新功能静态确认
+结果：Orange翻译、当前已开启、当前已关闭、#F3AF64、translator-plugin-panel-drag-region 均存在；translator-plugin-panel-drag-handle 不存在。
+
+已执行：
+git diff --check
+结果：通过。仅有 Git 的 LF/CRLF 提示，未发现 whitespace error。
+
+10. 解压后反向验证结果
+
+已将 ZIP 解压到仓库外临时目录进行验证。
+结果：通过。
+
+验证内容：
+- 第一层目标文件夹内存在 manifest.json；
+- manifest JSON 可解析；
+- name 和 version 与源码一致；
+- 安装说明存在；
+- 不存在多余嵌套；
+- 文件数量为 24。
+
+11. 依赖完整性结果
+
+已重新读取解压包中的 manifest、background importScripts、HTML script/link、CSS url 引用。
+结果：所有本地依赖均存在。
+
+12. 最新功能静态确认结果
+
+解压包中确认：
+- 品牌为 Orange翻译；
+- Popup 开关文案包含 当前已开启 / 当前已关闭；
+- 开启色包含 #F3AF64；
+- 标题拖动区域 class translator-plugin-panel-drag-region 存在；
+- 旧六点拖动手柄 class translator-plugin-panel-drag-handle 不存在；
+- manifest 版本为 1.0.4。
+
+13. 敏感信息扫描结果
+
+已扫描解压后的最终测试包文本文件。
+结果：未发现真实 API Key、Token、测试访问码、Authorization Bearer 明文、私钥、Service Account JSON、Cookie 或 Session。
+
+14. ZIP 完整路径
+
+D:\Project_Experimental\Translator_Plugin\Translator_Plugin_Releases\Orange翻译_v1.0.4_朋友测试版_20260730_1628.zip
+
+15. ZIP 文件大小
+
+86628 bytes
+
+16. SHA-256
+
+E0C656CCCE322FFCCCB48035757F5DF832ADD603DE87BA1B20DCC0F774ABDBB3
+
+同时生成同名 .sha256.txt 文件，内容仅包含文件名与 SHA-256。
+
+17. 用户仍需完成的 GUI 安装验收
+
+Codex 未执行 Chrome/Edge GUI 安装验收。用户仍需：
+1. 将 ZIP 复制到新的临时目录；
+2. 解压；
+3. 在 Chrome 或 Edge 中加载已解压扩展；
+4. 确认扩展名称为 Orange翻译；
+5. 确认版本为 1.0.4；
+6. 输入测试访问码并验证；
+7. 测试单词、短标题、整句、中文不触发、自动翻译开关、生词本、标题区域拖动和 resize；
+8. 确认测试包不依赖原项目目录。
+
+18. 是否修改产品代码
+
+否。本轮只生成测试包、安装说明、校验文件和打包报告。未继续修改产品功能代码。
+
+19. 是否修改 manifest 版本
+
+否。本轮不修改 manifest 版本，使用当前本地真实版本 1.0.4。
+
+20. 是否部署 Cloud Run
+
+否。未部署 Cloud Run，未修改 Gateway。
+
+21. 是否执行 Git commit/push
+
+否。未执行 git add、git commit 或 git push。
+
+22. 当前工作区历史未提交边界
+
+当前工作区仍包含此前功能改动、报告、release/WPS/plan_log/未纳入报告/未引用图标/tools 等历史未提交或未跟踪内容。本轮没有清理、回滚或删除这些内容。
+
+23. 未完成项和风险
+
+未完成项：真实 Chrome/Edge GUI 安装验收尚未执行。
+风险：朋友必须选择直接包含 manifest.json 的解压目录；测试访问码需要用户另行安全发送；开发者模式扩展依赖解压目录，不能安装后删除该目录。
+
+24. 给 ChatGPT 的快速上下文
+
+本轮基于当前 Orange翻译 v1.0.4 本地最新代码生成朋友 Beta 测试 ZIP。打包没有改 manifest 版本、产品代码、Gateway 或 Cloud Run。ZIP 内含单一顶层文件夹，里面直接有 manifest.json、运行文件、icons 和 安装与测试说明.txt。源码测试、图标尺寸、依赖完整性、解压反向验证、禁止文件扫描和敏感信息扫描均通过。最终 ZIP SHA-256 为 E0C656CCCE322FFCCCB48035757F5DF832ADD603DE87BA1B20DCC0F774ABDBB3。
+

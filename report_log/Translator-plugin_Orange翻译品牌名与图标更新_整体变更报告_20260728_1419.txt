@@ -1,0 +1,246 @@
+Orange翻译 品牌名与图标更新整体变更报告
+生成时间：2026-07-28 14:19
+
+1. 修改前品牌名
+
+修改前 manifest 中用户可见插件名称为：
+Translator-plugin
+
+popup、options、vocabulary、README、隐私说明、Beta 测试指南和朋友测试包说明中也存在面向用户显示的 Translator-plugin / Translator 文案。
+
+2. 修改后品牌名
+
+面向用户显示的品牌名统一为：
+Orange翻译
+
+未使用以下错误写法：
+- orange翻译
+- Orange 翻译
+- 酸橙翻译
+
+3. 三张图标修改前实际尺寸
+
+修改前检查结果：
+- icons\16_16.png：1254×1254
+- icons\32_32.png：1254×1254
+- icons\128_128.png：1254×1254
+
+4. 三张图标修改后实际尺寸
+
+修改后检查结果：
+- icons\16_16.png：16×16
+- icons\32_32.png：32×32
+- icons\128_128.png：128×128
+
+三张图标均保持 PNG 格式。当前读取到的像素格式为 Format24bppRgb。
+
+5. 原始图标备份位置
+
+原始 1254×1254 图标已备份到仓库外临时目录：
+C:\Users\aning\AppData\Local\Temp\Translator_Plugin_icon_backup_20260728_1415
+
+备份没有写入仓库、release、report_log 或 Git 跟踪目录。
+
+6. 使用的缩放方式
+
+使用 Python Pillow 对三张图分别进行高质量缩放：
+Image.Resampling.LANCZOS
+
+处理原则：
+- 分别以各自原文件作为来源；
+- 不裁切；
+- 不重绘；
+- 不修改蓝色、橙色或白色；
+- 不新增阴影、锐化、模糊或其它视觉效果；
+- 不转换为 JPEG；
+- 不生成 48×48 图标。
+
+7. manifest 实际修改字段
+
+manifest.json 修改内容：
+- name：Orange翻译
+- short_name：Orange翻译
+- version：1.0.2
+- icons.16：icons/16_16.png
+- icons.32：icons/32_32.png
+- icons.128：icons/128_128.png
+- action.default_title：Orange翻译
+- action.default_icon.16：icons/16_16.png
+- action.default_icon.32：icons/32_32.png
+
+保留内容：
+- manifest_version
+- permissions
+- host_permissions
+- background
+- content_scripts
+- options_ui
+- action.default_popup
+- Gateway URL
+
+注意：git diff -- manifest.json 中同时可见此前工作区已有的 Cloud Run host permission 改动，该改动不是本轮品牌任务新引入。
+
+8. manifest 版本修改前后
+
+修改前：
+1.0.1
+
+修改后：
+1.0.2
+
+本轮只 patch 递增一次。
+
+9. 实际修改的 UI / 文档文件
+
+本轮与品牌相关的实际修改文件：
+- manifest.json
+- icons\16_16.png
+- icons\32_32.png
+- icons\128_128.png
+- popup.html
+- options.html
+- vocabulary.html
+- README.md
+- CHANGELOG.md
+- PRIVACY.md
+- CONTRIBUTING.md
+- docs\architecture.md
+- docs\beta-test-guide.md
+- Translator-plugin_使用说明.txt
+- .github\ISSUE_TEMPLATE\bug_report.yml
+- .github\ISSUE_TEMPLATE\feature_request.yml
+- scripts\package-extension.ps1
+- tools\打包朋友测试版.ps1
+- tests\stage13-sentence-translation.test.js
+- tests\auto-translate-toggle-and-han-filter.test.js
+
+测试文件仅同步 manifest 版本断言，从 1.0.1 改为 1.0.2。
+
+10. 保留的内部 Translator 标识及原因
+
+以下 Translator / Translator-plugin 标识未机械替换：
+- D:\Project_Experimental\Translator_Plugin：本地项目目录；
+- Translator_Plugin_Releases：既有输出目录；
+- Translator_Plugin_WPS_Addin：历史/实验目录；
+- gateway README、gateway 包 docstring、gateway 启动脚本中的 Translator-plugin Gateway：技术服务标识；
+- background.js 中 Translator-plugin Provider Test：内部 Provider 测试用 pageTitle；
+- Stage11_Development_Report.md、report_log、plan_log：历史报告或计划记录；
+- scripts 中部分路径或旧技术命名：项目/发布流程内部标识。
+
+保留原因：
+这些属于内部技术标识、历史记录、路径、服务名或归档内容，不是当前插件面向用户的正式品牌显示。
+
+11. 是否修改任何后端或翻译逻辑
+
+未修改：
+- 翻译逻辑；
+- wordAnalysis；
+- sentenceTranslation；
+- contextSentence；
+- 自动翻译开关；
+- 中文过滤；
+- selectionIntentId；
+- 生词本数据结构；
+- Provider；
+- Gateway；
+- Cloud Run；
+- API Key；
+- Secret Manager；
+- Token；
+- 请求字段；
+- response schema。
+
+本轮只做品牌名、图标资源、manifest 图标引用、当前用户可见文案和打包清单的必要同步。
+
+12. 自动测试实际结果
+
+已通过：
+- node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest-json-ok')"
+- manifest 图标路径存在性检查
+- 图标像素尺寸检查
+- PowerShell 脚本语法检查：scripts\package-extension.ps1、tools\打包朋友测试版.ps1
+- node --check tests/stage13-sentence-translation.test.js
+- node --check tests/auto-translate-toggle-and-han-filter.test.js
+- node tests/stage13-sentence-translation.test.js
+- node tests/auto-translate-toggle-and-han-filter.test.js
+- node tests/gateway-provider.test.js
+- git diff --check
+- git diff -- manifest.json
+- git status --short
+
+说明：
+git diff --check 仅输出 LF/CRLF 提示，未发现 whitespace error。
+
+未执行：
+- Chrome GUI 人工验收；
+- 重新打包朋友测试包；
+- Cloud Run 部署；
+- Git add / commit / push。
+
+13. 用户仍需完成的 GUI 验收
+
+请用户手动验证：
+1. 打开 chrome://extensions；
+2. 找到开发版扩展并点击重新加载；
+3. 确认扩展卡片名称为 Orange翻译；
+4. 确认扩展卡片图标为蓝底橙子切片；
+5. 固定到工具栏，检查小尺寸图标是否清晰；
+6. 打开 popup，确认名称显示为 Orange翻译；
+7. 测试 popup、设置入口、自动翻译开关、生词本入口；
+8. 在网页划词，确认翻译与保存功能不受影响；
+9. 如仍显示旧图标，可再次重载、取消固定再固定、重开 chrome://extensions 或重启 Chrome。
+
+Codex 未进行 Chrome GUI 人工验收。
+
+14. 是否需要 Cloud Run 部署
+
+不需要。
+
+本轮是本地扩展资源和用户界面品牌更新，不涉及 Gateway 服务端、Cloud Run、Secret Manager 或远程 API。
+
+15. 是否需要重新生成朋友测试包
+
+需要在用户准备分发新版时重新生成朋友测试包。
+
+原因：
+朋友已安装的旧包不会自动获得新名称和新图标，必须重新生成并安装新包后才会看到 Orange翻译 品牌更新。
+
+本轮未自动重新打包。
+
+16. Git 状态与历史未提交改动边界
+
+当前分支：
+feat/gateway-beta
+
+当前 HEAD：
+06804a22d02ffe62fd714aaae1d50ff01ababb14
+
+本轮未执行：
+- git add
+- git commit
+- git push
+- git reset
+- git checkout
+- git restore
+- git clean
+- merge
+- rebase
+- force push
+
+当前工作区在本轮开始前已有多轮未提交修改，包括 Gateway/Cloud Run、自动翻译开关、中文过滤、sentenceTranslation v1.1、测试和历史报告。本轮没有清理、回滚或覆盖这些历史未提交改动。
+
+17. 未完成项和风险
+
+未完成项：
+- Chrome GUI 人工验收；
+- 如需发给朋友，需要重新生成测试包；
+- 如要发布到 GitHub，需要后续单独执行 Git 安全扫描、暂存、commit 和 push 流程。
+
+风险：
+- Chrome 可能缓存旧图标，需要重载扩展、取消固定再固定或重启浏览器。
+- 当前图标由 1254×1254 缩小得到，16×16 下实际清晰度仍需用户人工查看。
+- 当前仓库仍有多轮未提交改动，后续提交前需要明确区分本轮品牌更新与既有历史改动。
+
+18. 给 ChatGPT 的快速上下文
+
+本轮已将 Chrome 扩展面向用户品牌改为 Orange翻译。三张图标从 1254×1254 分别用 Pillow LANCZOS 缩放为真实 16×16、32×32、128×128，并写入 manifest 顶层 icons 与 action.default_icon。manifest 版本从 1.0.1 升至 1.0.2。当前 UI、README、隐私说明、Beta 测试指南、打包说明和相关测试断言已同步。未修改翻译逻辑、Provider、Gateway、Cloud Run、Storage 或请求/响应 schema。自动检查通过，Chrome GUI 尚需用户手动验收，未 commit/push，未重新打包朋友测试包。

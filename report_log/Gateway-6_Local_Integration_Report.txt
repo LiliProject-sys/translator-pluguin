@@ -1,0 +1,30 @@
+Gateway-6 Local Integration Report
+生成日期：2026-07-23
+编码：UTF-8
+
+阶段目标：
+- 本地 FastAPI Gateway 与 Chrome 插件连接 127.0.0.1；
+- 完成本地自动测试；
+- 预留真实 Gemini Key 人工联调。
+
+当前结果：
+- 已实现本地 Gateway 与插件侧 GatewayProvider。
+- 已生成共享 Beta Token，并写入仓库外私密 TXT。
+- 已生成本地 gateway/.env；该文件被 .gitignore 排除。
+- 未生成正式发布包。
+- 未将 manifest 版本升级到 1.1.0。
+- 当前目标版本仍仅确认为未来 1.1.0。
+
+待人工联调：
+- 需要用户在 gateway/.env 中补充 GEMINI_API_KEY。
+- 需要启动本地 Gateway 后在 Chrome 中执行 GUI 验收。
+
+Token 文件位置：
+- D:\Project_Experimental\Translator_Plugin_private\Translator-plugin_Beta共享访问Token_请勿上传GitHub.txt
+
+Token 脱敏摘要：
+- 前缀：CHXN7W
+- 后缀：vzmz7E
+
+敏感信息：
+- 本报告不包含完整 Token 或 API Key。

@@ -1,4 +1,4 @@
-﻿const assert = require("assert");
+const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
@@ -157,7 +157,7 @@ function testStaticStage18_2Boundaries() {
   const background = fs.readFileSync(path.join(projectRoot, "background.js"), "utf8");
   const vocabulary = fs.readFileSync(path.join(projectRoot, "vocabulary.js"), "utf8");
 
-  assert.equal(manifest.version, "1.0.2");
+  assert.equal(manifest.version, "1.0.4");
   assert(content.includes("function isSentenceBoundary"));
   assert(content.includes("function isDecimalPoint"));
   assert(content.includes("function isProtectedAbbreviationPeriod"));

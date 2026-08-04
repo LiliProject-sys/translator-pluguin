@@ -15,12 +15,22 @@ GEMINI_INTERACTIONS_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta
 
 
 class GeminiClient:
+    provider_id = "gemini"
+
     def __init__(self, api_key: str | None = None, model: str | None = None, timeout_seconds: int | None = None) -> None:
         self.api_key = api_key if api_key is not None else settings.gemini_api_key
         self.model = model or settings.gemini_model
         self.timeout_seconds = timeout_seconds or settings.gemini_timeout_seconds
 
-    def generate_json(self, prompt: dict, schema_model: Type[BaseModel], request_id: str) -> dict:
+    def generate_json(
+        self,
+        prompt: dict,
+        schema_model: Type[BaseModel],
+        request_id: str,
+        max_output_tokens: int | None = None,
+        telemetry: dict | None = None,
+    ) -> dict:
+        del max_output_tokens
         if not self.api_key:
             raise gateway_error(503, "UPSTREAM_CONFIGURATION_MISSING", "Gateway 暂时不可用", False, request_id)
 
@@ -56,6 +66,8 @@ class GeminiClient:
             raise gateway_error(503, "UPSTREAM_UNAVAILABLE", "Gemini 暂时不可用", False, request_id) from exc
 
         text = extract_interaction_text(response_data, request_id)
+        if telemetry is not None:
+            telemetry.update(extract_usage_telemetry(response_data, self.model))
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError as exc:
@@ -65,6 +77,17 @@ class GeminiClient:
             return schema_model.model_validate(parsed).model_dump()
         except ValidationError as exc:
             raise gateway_error(422, "UPSTREAM_SCHEMA_INVALID", "Gemini 返回结构不符合要求", False, request_id) from exc
+
+
+def extract_usage_telemetry(response_data: dict, model: str) -> dict:
+    usage = response_data.get("usage") if isinstance(response_data.get("usage"), dict) else {}
+    return {
+        "model": str(response_data.get("model") or model),
+        "inputTokens": usage.get("input_tokens") or usage.get("prompt_tokens"),
+        "outputTokens": usage.get("output_tokens") or usage.get("completion_tokens"),
+        "totalTokens": usage.get("total_tokens"),
+        "retryCount": 0,
+    }
 
 
 def extract_interaction_text(response_data: dict, request_id: str) -> str:

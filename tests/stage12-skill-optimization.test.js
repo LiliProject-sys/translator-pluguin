@@ -1,4 +1,4 @@
-﻿const assert = require("assert");
+const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
@@ -142,7 +142,7 @@ function testUiAndCompatibility() {
   const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "1.0.2");
+  assert.equal(manifest.version, "1.0.4");
   assert(content.includes("analysis.phonetic"));
   assert(content.includes("analysis.meaning"));
   assert(content.includes("analysis.meaningInSentence"));

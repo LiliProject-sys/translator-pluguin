@@ -1,0 +1,25 @@
+Gateway-7 CloudRun Preparation Report
+生成日期：2026-07-23
+编码：UTF-8
+
+阶段目标：
+- 准备 Dockerfile、PORT、环境变量说明；
+- 不实际部署 Cloud Run。
+
+变更文件：
+- gateway/Dockerfile
+- gateway/.dockerignore
+- gateway/README.txt
+
+实现摘要：
+- Dockerfile 固定 Python 3.10 slim。
+- Uvicorn 监听 0.0.0.0。
+- 端口读取 PORT，默认 8080。
+- 环境变量包括 BETA_ACCESS_TOKEN、GEMINI_API_KEY、GEMINI_MODEL。
+
+未执行：
+- 未创建 Cloud Run 服务。
+- 未设置 Cloud Run 环境变量。
+- 未获取 run.app HTTPS 地址。
+- 未替换正式 host_permissions。
+- 未打包朋友远程测试版本。

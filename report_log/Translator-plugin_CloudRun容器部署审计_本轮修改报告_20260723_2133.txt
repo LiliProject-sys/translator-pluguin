@@ -1,0 +1,117 @@
+1. 本轮基本信息
+
+项目：Translator-plugin
+仓库路径：D:\Project_Experimental\Translator_Plugin
+分支：feat/gateway-beta
+远程仓库：https://github.com/LiliProject-sys/translator-pluguin.git
+本轮任务：CloudRun-1 / 第 0 步，审计并修正 Gateway 的 Dockerfile、.dockerignore 与部署说明，使未来可从 gateway/ 目录安全进行 Cloud Run Source Deploy。
+执行边界：未部署 Cloud Run；未创建或修改 Google Cloud 资源；未配置 Secret Manager；未修改插件 Gateway URL；未修改 manifest host_permissions；未升级 manifest 版本；未合并 main；未 force push；未打包 ZIP。
+
+2. 本轮完成了什么
+
+完成了部署前只读 Git 审计、真实 Gateway Python 包结构审计、Dockerfile 修正、.dockerignore 修正、gateway/README.txt 最小说明更新、相关测试、安全检查、小型修复 commit 与 push。
+
+本轮只提交 3 个部署相关文件：
+- gateway/Dockerfile
+- gateway/.dockerignore
+- gateway/README.txt
+
+未修改 Gateway API、Skill、Provider、content.js 主链路、Token 鉴权方式、Gemini 模型或插件 manifest 版本。
+
+3. Dockerfile 修改前 → 修改后
+
+修改前：
+- Dockerfile 假定 build context 是仓库根目录；
+- 使用 COPY gateway/requirements.txt 与 COPY gateway ./gateway；
+- 启动模块为 gateway.app.main:app；
+- 当 Cloud Run Source Deploy 从 gateway/ 目录执行时，上述 COPY 路径不成立。
+
+修改后：
+- Dockerfile 以 gateway/ 作为 build context；
+- 使用 COPY requirements.txt ./requirements.txt；
+- 使用 COPY app ./app；
+- 容器内应用目录为 /app/app/main.py；
+- 启动模块为 app.main:app；
+- CMD 使用 exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}；
+- 容器不复制 .env，不固定 127.0.0.1 或本地 8000。
+
+4. 构建目录、包导入与 PORT 决策
+
+最终 build context：
+- translator-pluguin/gateway/
+
+最终容器目录结构：
+- /app/requirements.txt
+- /app/app/main.py
+- /app/app/auth.py
+- /app/app/config.py
+- /app/app/schemas.py
+- /app/app/gemini_client.py
+- /app/app/skills/*.py
+
+真实 import 审计结论：
+- gateway/app 内部使用相对导入，例如 from .auth、from .schemas、from ..schemas；
+- 不需要保留 gateway 顶层包；
+- 不需要大规模重构 Python import；
+- 从 gateway/ 目录模拟导入 app.main 成功。
+
+PORT 决策：
+- 容器监听 0.0.0.0；
+- 容器读取 Cloud Run 注入的 PORT；
+- PORT 默认回退 8080；
+- 本地 gateway/.env 不进入容器镜像。
+
+.dockerignore 决策：
+- 排除 .env、.env.*、.venv、Python 缓存、pytest 缓存、coverage、日志、tests、contracts、README、本地 .ps1/.cmd；
+- app/、requirements.txt、Dockerfile 保持可进入 build context；
+- contracts/fixtures 仅被测试使用，运行时代码不读取，因此可排除出镜像。
+
+5. 测试结果
+
+已执行并通过：
+- .\gateway\.venv\Scripts\python.exe -m unittest gateway.tests.test_gateway_contract：通过，7 tests；
+- .\gateway\.venv\Scripts\python.exe -m compileall gateway：通过；
+- node .\tests\gateway-provider.test.js：通过；
+- Dockerfile 静态审计：通过；
+- 从 gateway/ 目录模拟 import app.main：通过，返回 translator-gateway；
+- git diff --check：无实际 whitespace error，仅 Windows LF/CRLF 提示；
+- git diff --cached --check：通过；
+- git check-ignore -v gateway\.env：确认 gateway/.env 被 .gitignore 忽略；
+- git ls-files gateway\.env：无输出。
+
+Docker 本地构建：
+- 未执行；
+- 原因：当前环境无法识别 docker 命令；
+- 未安装 Docker；
+- 未把本地容器 build 或容器 /health 写成通过；
+- 后续需要由 Cloud Build 或具备 Docker 的环境首次验证镜像构建与容器 /health。
+
+6. Git commit/push 与安全状态
+
+本轮 commit：
+- hash：06804a22d02ffe62fd714aaae1d50ff01ababb14
+- message：fix: align Gateway container for Cloud Run source deploy
+
+push 结果：
+- 已普通 push 到 origin/feat/gateway-beta；
+- 本地 HEAD：06804a22d02ffe62fd714aaae1d50ff01ababb14；
+- origin/feat/gateway-beta：06804a22d02ffe62fd714aaae1d50ff01ababb14；
+- 本地 HEAD 与远程功能分支一致。
+
+安全状态：
+- gateway/.env 未 tracked；
+- Dockerfile 不复制 .env；
+- .dockerignore 排除 .env、.venv、缓存和本地产物；
+- 本轮提交未包含 Token、Gemini API Key、私密 TXT、Cookie、完整 Prompt 或完整模型响应；
+- 旧阶段报告和本报告仍保持本地未跟踪，未纳入 commit。
+
+未完成项：
+- Cloud Run 尚未部署；
+- Google Cloud Project、Billing、API、Secret Manager 尚未配置；
+- 正式 run.app HTTPS 地址尚未获得；
+- 插件 Gateway URL 与 manifest host_permissions 尚未切换到正式地址；
+- manifest 版本仍未升级。
+
+7. 给 ChatGPT 的快速上下文
+
+CloudRun-1 / 第 0 步已完成并推送。Gateway 的 Cloud Run Source Deploy build context 明确为仓库中的 gateway/ 目录。Dockerfile 已改为 COPY requirements.txt 与 COPY app ./app，容器内使用 /app/app/main.py，Uvicorn 模块路径为 app.main:app，监听 0.0.0.0，并读取 ${PORT:-8080}。本轮只提交 gateway/Dockerfile、gateway/.dockerignore、gateway/README.txt。commit 为 06804a22d02ffe62fd714aaae1d50ff01ababb14，已推送到 origin/feat/gateway-beta。本地 Docker 不可用，因此 Docker build 与容器 /health 未执行，需后续由 Cloud Build 或 Docker 环境验证。下一步是进入 Google Cloud Project、Billing、API 与 Secret Manager 配置阶段，仍需用户再次明确授权后才能实际部署。

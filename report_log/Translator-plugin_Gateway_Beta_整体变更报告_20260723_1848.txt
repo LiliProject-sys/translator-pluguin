@@ -1,0 +1,787 @@
+1. 报告基本信息
+
+报告名称：Translator-plugin Gateway Beta 整体变更报告
+生成日期与时间：2026-07-23 18:48:05
+项目名称：Translator-plugin
+项目绝对路径：D:\Project_Experimental\Translator_Plugin
+当前分支：feat/gateway-beta
+本轮开始前 HEAD：77690e83a644f415c966aa05e3d696677d90ef4f
+本轮结束后 HEAD：3ad3ce50fd01fdc54b4af1dc376164ab1e5bfabb
+是否创建 commit：是，已在 main 上创建 docs commit：3ad3ce5 docs: add Gateway integration context
+是否执行 push：本轮未执行 Git push。
+本轮任务目标：按用户确认的 Gateway Beta 最终审核 Plan，实现本地 FastAPI Gateway、插件 GatewayProvider、设置页 Token 验证、本地 host permission、合同 fixture、测试与 UTF-8 TXT 阶段报告。
+本轮任务状态：部分完成。代码实现与自动测试已完成；真实 Gemini 本地联调、Chrome GUI 人工验收、Cloud Run 实际部署、远程 Beta 与 1.1.0 版本升级未执行。
+
+长期报告规范状态：已确认采用。以后在 Translator-plugin 项目中每次完成实际修改后，均自动生成中文 UTF-8 TXT 本轮整体变更报告，保存到 report_log/。
+
+2. 本轮修改摘要
+
+本轮将 Translator-plugin 从纯客户端 BYOK Provider 模式扩展为“本地 Beta Gateway”模式。新增 gateway/ FastAPI 服务端，提供 /health、/v1/auth/verify、/v1/language 三个端点；新增 gateway-language-provider.js，让 Chrome 插件通过固定本地地址 http://127.0.0.1:8000 调用 Gateway；设置页新增普通用户欢迎区和测试访问码输入框，验证成功后才保存 Token 并切换 provider=gateway。
+
+用户现在能看到的主要变化是：打开 options 页面顶部会出现“欢迎使用 Translator”和“测试访问码”输入框，以及“验证并开始使用”按钮；原有百度、Gemini、DeepSeek、Mock 配置被收进“高级设置（自带 API Key）”折叠区域。
+
+内部架构变化是：translation-provider.js 新增 gateway Provider 注册；background.js 复用 TEST_LANGUAGE_PROVIDER 做 Gateway Token 验证；manifest.json 增加本地 Gateway host permission；服务端固定 Skill 与插件现有 Validator 通过共享 JSON fixture 对齐。
+
+明确没有修改：content.js 主链路、vocabularyEntries 数据结构、生词保存去重规则、旧 Baidu/Gemini/DeepSeek/Mock Provider 的核心实现、manifest 版本号 1.0.1、Cloud Run 线上部署。
+
+3. 修改前状态
+
+修改前用户操作流程：
+用户打开 options 页面后，需要在 Provider 下拉框中选择百度、DeepSeek、Gemini 或 Mock；如果选择 Gemini/DeepSeek/Baidu，需要自己填写 API Key 或 APPID/App Key。普通用户需要理解 Provider 和模型配置。
+
+修改前代码调用链：
+用户划词
+→ content.js 发送 TRANSLATE_TEXT
+→ background.js handleLanguageRequest()
+→ self.languageService.process()
+→ translation-provider.js providerRegistry
+→ baidu/deepseek/gemini/mock Provider
+→ normalizeProviderResult()
+→ background.js sendResponse({ status: "ok", ...result })
+→ content.js 渲染浮窗
+
+修改前接口合同：
+- 没有 gateway/ 服务端；
+- 没有 /health；
+- 没有 /v1/auth/verify；
+- 没有 /v1/language；
+- 没有 Gateway HTTP Envelope。
+
+修改前数据结构：
+- translationSettings 支持 provider、baiduAppId、baiduAppKey、deepseekApiKey、deepseekModel、geminiApiKey、geminiModel；
+- 不存在 gatewayAccessToken；
+- vocabularyEntries 保持本地字段：id、word、contextSentence、pageTitle、pageUrl、createdAt、lemma、phonetic、partOfSpeech、meaning、contextTranslation。
+
+修改前错误行为与限制：
+- 用户输入 Provider 自带 API Key，错误由各 Provider 返回；
+- 设置页 TEST_LANGUAGE_PROVIDER 只测试已有 Provider，不支持 provider=gateway；
+- 首次安装不会自动打开 options；
+- manifest host_permissions 不包含 http://127.0.0.1:8000/*。
+
+相关旧文件和函数：
+- background.js：importScripts、chrome.runtime.onInstalled、TEST_LANGUAGE_PROVIDER、handleLanguageRequest、createProviderTestPayload、normalizeTranslationError；
+- translation-provider.js：createConfiguredLanguageProvider、providerRegistry、normalizeProviderResult、normalizeProviderId；
+- options.html/options.js/options.css：Provider 下拉框和旧 API Key 配置；
+- ai-context-skill.js：Word Analysis Validator；
+- sentence-translation-skill.js：Sentence Translation Validator；
+- storage key：translationSettings、vocabularyEntries。
+
+4. 修改后状态
+
+修改前：普通用户必须选择 Provider 并理解 API Key。
+修改后：普通用户在 options 顶部输入共享 Beta Token，点击“验证并开始使用”；验证成功后才保存 gatewayAccessToken 并自动切换 provider=gateway。
+
+修改前：语言处理只走客户端 Provider。
+修改后：provider=gateway 时，插件走 GatewayProvider，再调用本地 FastAPI Gateway；Gateway 固定服务端 Skill 和 Gemini 模型，返回现有 UI 可直接使用的数据合同。
+
+修改前：TEST_LANGUAGE_PROVIDER 不支持候选 Token。
+修改后：TEST_LANGUAGE_PROVIDER 在 provider="gateway" 时读取 message.config.gatewayAccessToken，只调用 /v1/auth/verify；验证失败不保存 Token、不覆盖旧配置、不切换 Provider、不调用 Gemini。
+
+修改前：没有服务端输入限制。
+修改后：服务端 LanguageRequest 限制 text 最大 5000 字符、contextSentence 最大 5000 字符、pageTitle 最大 300 字符、请求体最大 32 KB；Token 使用 hmac.compare_digest 恒定时间比较。
+
+修改前：Gateway URL 不存在。
+修改后：Gateway URL 唯一源码定义在 gateway-language-provider.js 的 GATEWAY_BASE_URL，当前值为 http://127.0.0.1:8000。普通用户设置页不可见、不可编辑。
+
+修改后保持兼容：
+- content.js 主链路不变；
+- SAVE_VOCABULARY_ENTRY 与 GENERATE_VOCABULARY_CONTEXT_TRANSLATION Message Type 不变；
+- vocabularyEntries 结构不变；
+- 旧 Provider 仍可在高级设置中使用；
+- manifest 版本仍是 1.0.1。
+
+5. 文件级改动清单
+
+.gitignore
+修改类型：修改。
+修改原因：排除 Gateway 本地私密文件和 Python 运行产物。
+修改前：已排除 .env、*.env、node_modules、dist、build、credentials、private、user-data 等。
+修改后：新增 gateway/.env、gateway/.venv/、.venv/、__pycache__/、**/__pycache__/、.pytest_cache/、**/.pytest_cache/、*.pyc、*.pyo、.coverage、htmlcov/。
+兼容性：不影响运行代码；防止私密文件和缓存进入 Git。
+
+gateway-language-provider.js
+修改类型：新增。
+修改原因：新增 Chrome 插件侧 Gateway Provider。
+修改前：文件不存在。
+修改后：定义 gatewayLanguageProviderFactory.createGatewayLanguageProvider()，内部唯一 Gateway URL 常量 GATEWAY_BASE_URL，提供 process()、verifyAccessToken()、cancelRequest()、reset()、getPendingRequestCount()。
+关键对象：GATEWAY_BASE_URL、requestControllers Map、createLanguageBody、readLanguageResponse、REQUEST_CANCELLED、GATEWAY_REQUEST_ID_MISMATCH。
+调用关系：background.js importScripts 加载；translation-provider.js 从 globalScope.gatewayLanguageProviderFactory 创建实例；background.js 调 verifyAccessToken。
+用户可见影响：provider=gateway 时浮窗结果来自 Gateway；设置页可验证 Token。
+兼容性：不修改 content.js。
+
+translation-provider.js
+修改类型：修改。
+修改原因：把 gateway 注册到现有 providerRegistry。
+修改前：providerRegistry 包含 baidu、deepseek、gemini、mock。
+修改后：当 gatewayProvider 可用时追加 gateway；normalizeProviderResult() 透传 requestId、upstreamProvider，并且只在 result.cached 为真时输出 cached，Gateway 第一版不会产生 cached。
+关键函数：createConfiguredLanguageProvider、normalizeProviderResult、normalizeProviderId。
+兼容性：旧测试环境未 stub Gateway factory 时不会崩溃；旧 Provider 仍按原方式运行。
+
+background.js
+修改类型：修改。
+修改原因：加载 GatewayProvider、处理 Gateway Token 测试、首次安装打开 options。
+修改前：importScripts 不含 gateway-language-provider.js；TEST_LANGUAGE_PROVIDER 只创建测试 payload；onInstalled 只创建右键菜单。
+修改后：importScripts 加载 gateway-language-provider.js；provider=gateway 时调用 handleGatewayProviderTest；settings 变化时 reset gatewayLanguageProvider；onInstalled 保留 createContextMenu，并在 details.reason === "install" 时 openOptionsPage。
+关键 Message Type：TEST_LANGUAGE_PROVIDER、CANCEL_LANGUAGE_REQUEST、GENERATE_VOCABULARY_CONTEXT_TRANSLATION。
+兼容性：不新增 VERIFY_GATEWAY_ACCESS；继续复用现有 Message。
+
+manifest.json
+修改类型：修改。
+修改原因：本地 Gateway fetch 需要 host permission。
+修改前：host_permissions 只包含百度、DeepSeek、Gemini。
+修改后：增加 http://127.0.0.1:8000/*。
+用户可见影响：扩展权限包含本地 Gateway 地址。
+版本：仍为 1.0.1。
+
+options.html
+修改类型：修改。
+修改原因：新增普通用户 Gateway Beta 欢迎与 Token 输入。
+修改前：顶部显示语言处理设置、Provider 下拉框和各 Provider 配置。
+修改后：顶部显示“欢迎使用 Translator”、测试访问码输入框和“验证并开始使用”；旧 Provider 配置收进 details#advancedSettings。
+关键 DOM：gatewayAccessTokenInput、gatewayStartButton、gatewayStatus、advancedSettings、providerSelect。
+用户可见影响：普通用户默认看到 Token 验证流程。
+
+options.css
+修改类型：修改。
+修改原因：支持欢迎区域与高级设置折叠样式。
+修改后新增：.gateway-welcome、.advanced-settings、.advanced-settings > summary。
+
+options.js
+修改类型：修改。
+修改原因：实现候选 Token 验证成功后保存，失败不覆盖。
+修改前：testProvider(provider) 只发送 provider id；normalizeProvider 默认 baidu；没有 gatewayAccessToken。
+修改后：新增 verifyGatewayAccessToken()；发送 TEST_LANGUAGE_PROVIDER + provider=gateway + config.gatewayAccessToken；成功后写 translationSettings.gatewayAccessToken 与 provider=gateway；失败不写 storage。
+关键 storage key：translationSettings.gatewayAccessToken、translationSettings.provider。
+
+gateway/
+修改类型：新增目录。
+修改原因：新增本地 FastAPI Gateway。
+关键文件：
+- gateway/app/main.py：FastAPI app 和三个端点；
+- gateway/app/auth.py：Bearer Token 提取与 hmac.compare_digest；
+- gateway/app/schemas.py：Pydantic 请求与输出 Schema；
+- gateway/app/gemini_client.py：Gemini Interactions API 调用；
+- gateway/app/skills/word_analysis.py：服务端 Word Analysis 固定 Skill；
+- gateway/app/skills/sentence_translation.py：服务端 Sentence Translation 固定 Skill；
+- gateway/contracts/fixtures/*.json：服务端/插件共享合同；
+- gateway/tests/test_gateway_contract.py：Python 合同测试；
+- gateway/Dockerfile、gateway/.dockerignore、gateway/README.txt：Cloud Run 准备文件；
+- gateway/.env.example：示例环境变量。
+
+tests/gateway-provider.test.js
+修改类型：新增。
+修改原因：覆盖插件侧 GatewayProvider 和共享 fixture。
+覆盖内容：白名单 body、Token 不进 body、requestId mismatch、HTTP/JSON 错误映射、AbortController Map 清理、AbortError 到 REQUEST_CANCELLED、verify token、providerRegistry 注册、fixture 被现有 Validator 接受。
+
+README.md、PRIVACY.md、SECURITY.md、CHANGELOG.md
+修改类型：修改。
+修改原因：记录 Gateway Beta 本地范围、隐私、安全、版本策略。
+关键内容：不升级 1.1.0；不部署 Cloud Run；Token 只走 Bearer；不发送 pageUrl/userQuestion/Prompt/模型名/API Key。
+
+report_log/Gateway-*.txt、report_log/Translator-plugin_Gateway_Beta_Final_Report.txt
+修改类型：新增。
+修改原因：按阶段生成 UTF-8 TXT 报告。
+注意：这些阶段报告是本轮生成的开发记录，不包含完整 Token、API Key、完整用户文本、完整 Prompt 或完整模型响应。
+
+6. 修改前后代码或配置对比
+
+对比 1：Provider Registry
+
+【修改前】
+```js
+const providerRegistry = Object.freeze({
+  baidu: ...,
+  deepseek: ...,
+  gemini: ...,
+  mock: ...
+});
+```
+
+【修改后】
+```js
+const registryEntries = {
+  baidu: ...,
+  deepseek: ...,
+  gemini: ...,
+  mock: ...
+};
+
+if (gatewayProvider && typeof gatewayProvider.process === "function") {
+  registryEntries.gateway = Object.freeze({
+    resultType: "contextAnalysis",
+    execute: (request, processOptions) => gatewayProvider.process(request, processOptions || {}),
+    cancel: (requestId) => cancelProviderRequest(gatewayProvider, requestId)
+  });
+}
+```
+
+说明：新增 gateway Provider，但保持旧测试环境缺少 Gateway factory 时不崩溃。content.js 不需要知道 gateway。
+
+对比 2：Gateway Token 验证 Message
+
+【修改前】
+```js
+if (message.type === "TEST_LANGUAGE_PROVIDER") {
+  const providerId = normalizeText(message.provider);
+  handleLanguageRequest(createProviderTestPayload(providerId), sendResponse, providerId);
+  return true;
+}
+```
+
+【修改后】
+```js
+if (message.type === "TEST_LANGUAGE_PROVIDER") {
+  const providerId = normalizeText(message.provider);
+  if (providerId === "gateway") {
+    handleGatewayProviderTest(message.config || {}, sendResponse);
+    return true;
+  }
+  handleLanguageRequest(createProviderTestPayload(providerId), sendResponse, providerId);
+  return true;
+}
+```
+
+说明：没有新增 Message Type。Gateway Token 验证复用 TEST_LANGUAGE_PROVIDER；失败不会写 storage。
+
+对比 3：设置页入口
+
+【修改前】
+```html
+<h1>语言处理设置</h1>
+<select id="providerSelect">
+  <option value="baidu">百度快速翻译</option>
+  ...
+</select>
+```
+
+【修改后】
+```html
+<h1>欢迎使用 Translator</h1>
+<input id="gatewayAccessTokenInput" type="password">
+<button id="gatewayStartButton" type="button">验证并开始使用</button>
+<details id="advancedSettings" class="advanced-settings">
+  <summary>高级设置（自带 API Key）</summary>
+  ...
+</details>
+```
+
+说明：普通用户默认只看到 Token 输入；旧 BYOK Provider 仍保留。
+
+对比 4：GatewayProvider 白名单请求体
+
+修改前：
+gateway-language-provider.js 不存在。
+
+修改后：
+```js
+return {
+  requestId,
+  requestType: normalizeRequestType(request && request.requestType),
+  analysisMode: normalizeAnalysisMode(request && request.analysisMode),
+  sourceLanguage: normalizeText(request && request.sourceLanguage) || "en",
+  targetLanguage: normalizeText(request && request.targetLanguage) || "zh-CN",
+  text,
+  contextSentence,
+  pageTitle: limitText(normalizeText(request && request.pageTitle), MAX_PAGE_TITLE_LENGTH)
+};
+```
+
+说明：不发送 userQuestion、Prompt、模型名、providerPreference、Gateway URL、Gemini API Key、pageUrl、hostname 或整页正文。
+
+对比 5：服务端端点合同
+
+修改前：
+gateway/app/main.py 不存在。
+
+修改后：
+```py
+@app.get("/health")
+async def health():
+    return {"status": "ok", "service": "translator-gateway"}
+
+@app.post("/v1/auth/verify", dependencies=[Depends(require_beta_token)])
+async def verify_auth():
+    return {"status": "ok", "access": "granted"}
+
+@app.post("/v1/language")
+async def language(payload: LanguageRequest, token: str = Depends(require_beta_token)):
+    ...
+```
+
+说明：三个端点独立合同；只有 /v1/language 需要 requestId 并调用 Gemini。
+
+7. 用户可见变化
+
+已发生的用户可见 UI 变化：
+- options 页面标题从“语言处理设置”改为“欢迎使用 Translator”；
+- 页面顶部新增测试访问码输入框；
+- 新增“验证并开始使用”按钮；
+- 旧 Provider 配置收进“高级设置（自带 API Key）”；
+- Provider 下拉框新增 Gateway Beta；
+- 首次安装扩展时计划自动打开 options 页面。
+
+未变化：
+- 划词浮窗 UI 结构未直接修改；
+- content.js 的划词、旧响应丢弃、保存按钮、Detail、Sentence Translation 逻辑未改；
+- 生词本页面未改；
+- popup 未改；
+- 生词保存数据结构未改。
+
+8. 调用链与数据流变化
+
+修改前：
+用户划词
+→ content.js
+→ background.js
+→ languageService.process()
+→ GeminiProvider / DeepSeekProvider / BaiduProvider / Mock
+→ normalizeProviderResult()
+→ background.js 添加 status
+→ content.js 渲染
+
+修改后 provider=gateway：
+用户划词
+→ content.js
+→ background.js handleLanguageRequest()
+→ languageService.process()
+→ translation-provider.js providerRegistry.gateway
+→ gateway-language-provider.js
+→ FastAPI Gateway /v1/language
+→ Gemini
+→ FastAPI Gateway Schema 校验
+→ Gateway HTTP Envelope
+→ GatewayProvider 校验 requestId
+→ 只取 response.data 并合并 requestId
+→ normalizeProviderResult() 和现有 Validator
+→ background.js sendResponse({ status: "ok", ...result })
+→ content.js 渲染
+
+请求字段：
+- 发送：requestId、requestType、analysisMode、sourceLanguage、targetLanguage、text、contextSentence、pageTitle。
+- 不发送：userQuestion、pageUrl、hostname、Prompt、Skill 内容、模型名、providerPreference、Gateway URL、Gemini API Key、整页正文、vocabularyEntries 全量。
+
+status 添加位置：
+- Gateway HTTP 响应有外层 status；
+- GatewayProvider 不把外层 status 传给 languageService；
+- background.js 最终仍添加当前插件已有 status。
+
+requestId：
+- 由 content.js 或 background.js 现有调用方生成；
+- GatewayProvider 原样发送；
+- Gateway 原样返回；
+- GatewayProvider 校验一致；
+- content.js 继续用现有 selectionId/requestId 机制丢弃旧响应。
+
+错误转换：
+- Gateway HTTP/JSON 错误在 GatewayProvider 转换为现有 Provider error；
+- REQUEST_CANCELLED 由 background.js 转成 status="cancelled"；
+- 其他错误由 background.js 转成 status="error"。
+
+用户数据保存：
+- vocabularyEntries 仍在 chrome.storage.local；
+- gatewayAccessToken 存在 chrome.storage.local 的 translationSettings.gatewayAccessToken；
+- 完整 Beta Token 另有仓库外私密 TXT 和 ignored 的 gateway/.env。
+
+9. 接口、Message、Schema 与 Storage 变化
+
+HTTP 路由：
+- 新增 GET /health：无需 Authorization，不调用 Gemini，无 requestId，返回 { status: "ok", service: "translator-gateway" }。
+- 新增 POST /v1/auth/verify：Authorization Bearer 候选 Token，不调用 Gemini，无 requestId，成功返回 { status: "ok", access: "granted" }，失败 401。
+- 新增 POST /v1/language：Authorization Bearer 共享 Token，必须 requestId，调用 Gemini，返回 Envelope。
+
+Chrome runtime Message Type：
+- 未新增 Message Type；
+- TEST_LANGUAGE_PROVIDER 新增 provider="gateway" 分支；
+- CANCEL_LANGUAGE_REQUEST 继续复用。
+
+Provider 接口：
+- 新增 gatewayProvider.process(request)；
+- 新增 gatewayProvider.verifyAccessToken(candidateToken)；
+- 新增 gatewayProvider.cancelRequest(requestId)；
+- 新增 gatewayProvider.reset()。
+
+Validator：
+- 客户端 ai-context-skill.js 与 sentence-translation-skill.js 未修改；
+- Gateway 返回 data 后仍由 normalizeProviderResult() 调用现有 Validator。
+
+Skill version：
+- Word Analysis：context-analysis-v6；
+- Sentence Translation：sentence-translation-v1。
+
+storage key：
+- translationSettings 新增 gatewayAccessToken；
+- translationSettings.provider 可为 gateway；
+- vocabularyEntries 不变。
+
+manifest permissions：
+- 新增 http://127.0.0.1:8000/*；
+- 未新增 localhost；
+- 未替换 Cloud Run 正式 host。
+
+环境变量：
+- BETA_ACCESS_TOKEN；
+- GEMINI_API_KEY；
+- GEMINI_MODEL；
+- PORT。
+
+迁移逻辑：
+- 无强制迁移。旧 translationSettings 缺少 gatewayAccessToken 时，GatewayProvider 返回 CONFIG_REQUIRED。
+
+10. 安全、隐私与敏感信息处理
+
+本轮涉及 Token：是。已生成共享 Beta Token。
+完整 Token 保存位置：
+- D:\Project_Experimental\Translator_Plugin_private\Translator-plugin_Beta共享访问Token_请勿上传GitHub.txt
+- gateway/.env
+
+Token 脱敏摘要：CHXN7W...vzmz7E
+
+本轮涉及 API Key：涉及 GEMINI_API_KEY 配置位，但未写入真实 Gemini API Key。gateway/.env 中 GEMINI_API_KEY 仍为空。
+本轮涉及用户选中文本：代码路径涉及 text 字段；报告不包含真实用户选中文本。
+本轮涉及上下文句子：代码路径涉及 contextSentence 字段；报告不包含真实完整上下文句子。
+本轮涉及页面标题：代码路径涉及 pageTitle，可选且最大 300 字符；日志和报告不记录完整真实标题。
+本轮涉及页面 URL：Gateway 请求明确不发送 pageUrl。
+本轮涉及日志：要求日志脱敏，不记录完整输入、Prompt、响应、Token、API Key。
+本轮涉及 .env：是，gateway/.env 已生成并被 .gitignore 排除。
+本轮涉及 GitHub Public 仓库：是，仓库为 Public，因此 Token/API Key 不得进入 Git。
+
+敏感确认：
+- 完整 Token 未进入 Git。
+- API Key 未进入 Git。
+- 完整 Token 未写入报告。
+- 完整用户文本未写入报告。
+- 完整 Prompt 未写入报告。
+- 完整模型响应未写入报告。
+- .gitignore 覆盖 gateway/.env。
+- 敏感扫描命令未命中可提交的真实 Key/Token 模式。
+
+11. 自动测试
+
+命令 1：
+python -m unittest gateway.tests.test_gateway_contract
+运行目录：D:\Project_Experimental\Translator_Plugin
+结果：通过。
+通过数量：7 个 unittest 测试。
+失败数量：0。
+警告：无。
+备注：曾因本机 fastapi.testclient/httpx 版本不匹配失败；已改为直接测试 route endpoint、auth 和 Pydantic schema，重新运行通过。
+
+命令 2：
+python -m compileall gateway
+运行目录：D:\Project_Experimental\Translator_Plugin
+结果：通过。
+通过数量：Python 文件均成功编译。
+失败数量：0。
+警告：无。
+
+命令 3：
+node tests\gateway-provider.test.js
+运行目录：D:\Project_Experimental\Translator_Plugin
+结果：通过，输出 gateway-provider-tests-ok。
+通过数量：1 个 Node 测试文件，内部覆盖多个 GatewayProvider 场景。
+失败数量：0。
+警告：无。
+
+命令 4：
+Get-ChildItem -Path 'tests' -Filter '*.test.js' | Sort-Object Name | ForEach-Object { Write-Host "RUN $($_.Name)"; node $_.FullName }
+运行目录：D:\Project_Experimental\Translator_Plugin
+结果：通过。
+通过数量：18 个 Node 测试文件全部通过。
+失败数量：0。
+警告：Gemini detail 测试输出了预期 console.info 调试日志；非失败。
+通过文件包括：gateway-provider.test.js、stage10-floating-panel-interaction.test.js、stage11-floating-panel-resize.test.js、stage12-skill-optimization.test.js、stage13-sentence-translation.test.js、stage14-word-skill-v4.1.test.js、stage15-word-analysis-minimalism.test.js、stage16_5-deepseek-provider-sync.test.js、stage16-ui-density.test.js、stage17-deepseek-minimal-output.test.js、stage18_1-vocabulary-context-recall.test.js、stage18_2-sentence-boundary-heuristic.test.js、stage18-vocabulary-book.test.js、stage6-interactions-bugfix.test.js、stage7-deepseek-provider-framework.test.js、stage8-skill2-optimization.test.js、stage9.2-detail-lifecycle.test.js、stage9-ai-skill-upgrade.test.js、v1.0.1-floating-panel-persistence.test.js。
+
+命令 5：
+git diff --check
+运行目录：D:\Project_Experimental\Translator_Plugin
+结果：通过。
+通过数量：无 whitespace error。
+失败数量：0。
+警告：Git 提示部分文本文件 LF 下次触碰会替换为 CRLF；非 diff check 失败。
+
+命令 6：
+rg -n "AIza[0-9A-Za-z_-]+|sk-[0-9A-Za-z_-]+|Bearer\s+[A-Za-z0-9._~+/=-]{16,}|GEMINI_API_KEY\s*=\s*[^e\r\n]|BETA_ACCESS_TOKEN\s*=\s*[^e\r\n]" .
+运行目录：D:\Project_Experimental\Translator_Plugin
+结果：无匹配。
+通过数量：敏感模式扫描未发现可提交的真实 Token/API Key。
+失败数量：0。
+
+12. 人工 GUI 验收
+
+本轮未进行人工 Chrome GUI 验收。
+
+逐项状态：
+- Chrome 重新加载扩展：未验证。
+- 首次安装自动打开 options：未验证。
+- 输入共享 Token 并验证成功：未验证。
+- 错误 Token 提示：未验证。
+- 普通用户看不到 Gateway URL：未进行真实浏览器检查，但代码层已实现不显示 URL。
+- 高级设置折叠：未进行真实浏览器检查。
+- 划选单词显示浮窗：未验证。
+- Word Quick：未验证。
+- Detail：未验证。
+- Sentence Translation：未验证。
+- 保存生词：未验证。
+- contextTranslation 异步补写：未验证。
+- Gateway 离线提示：未验证。
+- 关闭浮窗取消请求：未验证。
+- 快速切换选区旧结果不覆盖：未验证。
+
+不能把 Node 测试通过视为人工 GUI 验收通过。
+
+13. Git 状态
+
+报告生成前 git branch --show-current：
+feat/gateway-beta
+
+报告生成前当前 HEAD：
+3ad3ce50fd01fdc54b4af1dc376164ab1e5bfabb
+
+报告生成前 git status --short：
+ M .gitignore
+ M CHANGELOG.md
+ M PRIVACY.md
+ M README.md
+ M SECURITY.md
+ M background.js
+ M manifest.json
+ M options.css
+ M options.html
+ M options.js
+ M translation-provider.js
+?? gateway-language-provider.js
+?? gateway/
+?? report_log/Gateway-0_Repository_Review_Report.txt
+?? report_log/Gateway-1_FastAPI_Mock_Report.txt
+?? report_log/Gateway-2_Gemini_Server_Report.txt
+?? report_log/Gateway-3_Plugin_Provider_Report.txt
+?? report_log/Gateway-4_Options_Onboarding_Report.txt
+?? report_log/Gateway-5_ContextTranslation_Report.txt
+?? report_log/Gateway-6_Local_Integration_Report.txt
+?? report_log/Gateway-7_CloudRun_Preparation_Report.txt
+?? report_log/Translator-plugin_Gateway_Beta_Final_Report.txt
+?? tests/gateway-provider.test.js
+
+说明：本报告文件生成后，还会新增：
+?? report_log/Translator-plugin_Gateway_Beta_整体变更报告_20260723_1848.txt
+
+报告生成前 git diff --stat：
+ .gitignore              |  11 ++++
+ CHANGELOG.md            |   5 ++
+ PRIVACY.md              |   4 ++
+ README.md               |   6 +++
+ SECURITY.md             |   4 ++
+ background.js           |  41 +++++++++++++-
+ manifest.json           |   3 +-
+ options.css             |  23 ++++++++
+ options.html            | 138 +++++++++++++++++++++++++++---------------------
+ options.js              |  51 +++++++++++++++++-
+ translation-provider.js |  41 ++++++++++----
+ 11 files changed, 253 insertions(+), 74 deletions(-)
+
+注意：git diff --stat 默认不统计未跟踪新增文件，因此 gateway/、gateway-language-provider.js、tests/gateway-provider.test.js 和新增 report_log 文件未出现在上述 stat 中。
+
+报告生成前 git diff --name-status：
+M	.gitignore
+M	CHANGELOG.md
+M	PRIVACY.md
+M	README.md
+M	SECURITY.md
+M	background.js
+M	manifest.json
+M	options.css
+M	options.html
+M	options.js
+M	translation-provider.js
+
+未跟踪文件：
+- gateway-language-provider.js
+- gateway/.dockerignore
+- gateway/.env.example
+- gateway/Dockerfile
+- gateway/README.txt
+- gateway/__init__.py
+- gateway/app/*
+- gateway/contracts/fixtures/*
+- gateway/requirements.txt
+- gateway/tests/test_gateway_contract.py
+- report_log/Gateway-*.txt
+- report_log/Translator-plugin_Gateway_Beta_Final_Report.txt
+- tests/gateway-provider.test.js
+- 本报告文件生成后新增 report_log/Translator-plugin_Gateway_Beta_整体变更报告_20260723_1848.txt
+
+敏感文件状态：
+- gateway/.env 存在，但 git status --short --ignored gateway\.env 显示 !! gateway/.env，表示已被忽略。
+
+是否已 commit：
+- 已创建 docs commit：3ad3ce5 docs: add Gateway integration context。
+- Gateway 实现代码本身尚未 commit。
+
+是否已 push：
+- 本轮未执行 Git push。
+
+14. 未完成项与已知限制
+
+未完成项：
+- 未在 gateway/.env 中填入真实 GEMINI_API_KEY。
+- 未启动本地 uvicorn 服务做真实 /v1/language Gemini 联调。
+- 未在 Chrome 中重新加载扩展做 GUI 验收。
+- 未测试真实错误 Token UI。
+- 未测试 Gateway 离线 UI。
+- 未测试真实划词浮窗通过 Gateway 返回结果。
+- 未部署 Cloud Run。
+- 未替换正式 HTTPS Gateway URL。
+- 未修改正式 host_permissions。
+- 未打包朋友远程测试 ZIP。
+- 未将 manifest 版本升级到 1.1.0。
+- 未 commit Gateway 实现代码。
+- 未 push。
+
+当前是否可以交给用户测试：
+- 可以交给用户进行本地代码审阅和自动测试复跑。
+- 若要实际 Chrome + Gateway 本地测试，需要先在 gateway/.env 补充 GEMINI_API_KEY 并启动本地 Gateway。
+
+当前是否可以合并 main：
+- 不建议。缺少真实本地 Gemini 联调和 Chrome GUI 人工验收。
+
+当前是否可以发布：
+- 不可以。仍指向 127.0.0.1，未完成 Cloud Run 与远程 Beta。
+
+15. 风险与回滚方式
+
+风险 1：旧 Provider 注册受影响。
+触发条件：translation-provider.js 新增 gateway 注册逻辑影响 providerRegistry。
+当前测试：全量 Node Provider 测试通过。
+回滚方式：回退 translation-provider.js 和 gateway-language-provider.js。
+
+风险 2：content.js 主链路。
+触发条件：Gateway 返回字段不符合现有 Validator。
+当前测试：共享 fixture 被 Node Validator 接受；content.js 未修改。
+回滚方式：回退 GatewayProvider 注册，切回旧 provider。
+
+风险 3：生词保存和 contextTranslation。
+触发条件：active provider=gateway 时 contextTranslation 调用 Gateway sentenceTranslation。
+当前测试：旧 Stage18.1 测试通过；新增 GatewayProvider 测试通过。
+人工状态：未做真实 GUI 保存测试。
+回滚方式：切换 provider 到旧 Gemini/DeepSeek/Baidu；或回退 gateway-language-provider.js 与 translation-provider.js。
+
+风险 4：manifest host_permissions。
+触发条件：新增 http://127.0.0.1:8000/* 只适合本地 Beta。
+当前测试：manifest 静态测试通过。
+回滚方式：删除该 host permission。
+
+风险 5：取消请求。
+触发条件：GatewayProvider 内部 AbortController Map 未清理或 AbortError 未映射。
+当前测试：tests/gateway-provider.test.js 覆盖成功、失败、取消后 Map 清理和 REQUEST_CANCELLED。
+回滚方式：回退 gateway-language-provider.js。
+
+风险 6：设置页。
+触发条件：普通用户欢迎流影响旧 Provider 配置。
+当前测试：静态和 Node 回归通过；未做浏览器 GUI。
+回滚方式：回退 options.html、options.css、options.js。
+
+风险 7：Cloud Run 准备文件。
+触发条件：Dockerfile 未经过真实 Cloud Run 部署。
+当前测试：仅 Python 编译和静态存在；未部署。
+回滚方式：回退 gateway/Dockerfile、gateway/.dockerignore、gateway/README.txt。
+
+风险 8：Git 历史。
+触发条件：main 已多一个 docs commit，feat/gateway-beta 从该 commit 创建。
+当前状态：符合计划；未 push。
+回滚方式：如用户明确要求，可用新的反向提交或按用户指令处理；不要擅自重写历史。
+
+16. 下一步建议
+
+1. 用户在 gateway/.env 中补充 GEMINI_API_KEY。
+2. 启动本地 Gateway：
+   uvicorn gateway.app.main:app --host 127.0.0.1 --port 8000
+3. 用 /health、/v1/auth/verify、/v1/language 做本地接口实测。
+4. 在 Chrome 重新加载扩展，执行人工 GUI 验收：
+   - 首次安装或重新加载设置页；
+   - 输入共享 Token；
+   - 验证成功；
+   - 划词 Word Quick；
+   - 点击 Detail；
+   - 选句 Sentence；
+   - 保存生词；
+   - contextTranslation 补写；
+   - 错误 Token；
+   - Gateway 离线；
+   - 关闭浮窗取消；
+   - 快速切换选区旧响应不覆盖；
+   - 高级设置旧 Provider 仍可用。
+5. GUI 验收通过后再考虑 commit Gateway 实现。
+6. Cloud Run 实际部署属于未来 Gateway-8，需用户再次明确授权。
+
+17. 给下一位协作者 / ChatGPT 的快速上下文
+
+本轮目标：
+为 Chrome Translator-plugin 实现本地 Gateway Beta：用户只输入共享 Beta Token，插件通过本地 FastAPI Gateway 固定调用 Gemini，保留旧 Provider 和本地生词本。
+
+修改前：
+插件只有客户端 Provider：baidu、deepseek、gemini、mock。普通用户需要在 options 选择 Provider 并填写 API Key。没有 gateway/ 服务端，没有 GatewayProvider，没有 Token 验证欢迎流。
+
+修改后：
+新增本地 FastAPI Gateway 与插件 GatewayProvider。options 顶部新增测试访问码输入框；验证成功后保存 translationSettings.gatewayAccessToken 并设置 provider=gateway。GatewayProvider 调用 http://127.0.0.1:8000。旧 BYOK 设置保留在高级设置中。
+
+新增对象：
+- gateway-language-provider.js
+- gateway/app/main.py
+- gateway/app/auth.py
+- gateway/app/schemas.py
+- gateway/app/gemini_client.py
+- gateway/app/skills/word_analysis.py
+- gateway/app/skills/sentence_translation.py
+- gateway/contracts/fixtures/*.json
+- tests/gateway-provider.test.js
+
+当前调用链：
+content.js
+→ background.js
+→ languageService.process()
+→ translation-provider.js providerRegistry.gateway
+→ gateway-language-provider.js
+→ FastAPI /v1/language
+→ Gemini
+→ FastAPI Schema 校验
+→ GatewayProvider requestId 校验
+→ normalizeProviderResult()
+→ background.js status 包装
+→ content.js 渲染
+
+测试结果：
+- Python unittest：7 个测试通过。
+- Python compileall：通过。
+- 新增 Node GatewayProvider 测试：通过。
+- 全量 18 个 Node 测试文件：通过。
+- git diff --check：通过。
+- 敏感扫描：无匹配。
+
+人工验收：
+本轮未进行人工 Chrome GUI 验收。
+
+当前 Git 状态：
+- 当前分支 feat/gateway-beta。
+- HEAD 为 3ad3ce5 docs commit。
+- Gateway 实现代码未 commit。
+- gateway/.env 存在且被 Git ignore。
+- 本报告生成后会新增一个未跟踪 TXT 报告文件。
+
+仍未完成：
+- 真实 GEMINI_API_KEY 未填入。
+- 本地 Gateway 未启动做真实 Gemini 联调。
+- Chrome GUI 未验收。
+- Cloud Run 未部署。
+- 远程 Beta 未打包。
+- manifest 未升级到 1.1.0。
+
+冻结决策，不应重新讨论：
+- 本阶段只做本地 Beta 与 Cloud Run 准备，不做 Gateway-8。
+- Gateway URL 本地固定 http://127.0.0.1:8000。
+- 普通用户设置页不显示 Gateway URL。
+- Token 只走 Authorization Bearer，不进 JSON body。
+- Gateway 请求 body 白名单化，不发送 userQuestion、Prompt、模型名、providerPreference、pageUrl、API Key。
+- content.js 主链路不改。
+- vocabularyEntries 结构不改。
+- 旧 BYOK Provider 继续保留。
+- manifest 版本暂不升级，仍为 1.0.1。

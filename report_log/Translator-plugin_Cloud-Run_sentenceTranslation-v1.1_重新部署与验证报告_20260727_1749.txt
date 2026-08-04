@@ -1,0 +1,159 @@
+Translator-plugin Cloud Run sentenceTranslation-v1.1 重新部署与验证报告
+生成时间：2026-07-27 17:49
+
+1. 部署前分支、HEAD 和 Git 状态
+
+项目目录：
+D:\Project_Experimental\Translator_Plugin
+
+当前分支：
+feat/gateway-beta
+
+当前 HEAD：
+06804a22d02ffe62fd714aaae1d50ff01ababb14
+
+工作区状态：
+当前工作区存在多轮未提交改动，包含 README、content.js、gateway-language-provider.js、gateway/app/skills/sentence_translation.py、gateway/contracts/fixtures/sentence-success.json、gateway/tests/test_gateway_contract.py、sentence-translation-skill.js、tests/gateway-provider.test.js、tests/stage13-sentence-translation.test.js 等文件，以及 report_log、tools、测试包目录等未跟踪文件。
+
+本轮未执行 git add、git commit、git push、git reset、git checkout、git restore、git clean、merge、rebase 或 force push。
+
+2. 部署前关键测试实际结果
+
+已执行并通过：
+- python -m py_compile gateway/app/skills/sentence_translation.py gateway/tests/test_gateway_contract.py
+- python -m unittest gateway.tests.test_gateway_contract
+- node tests/stage13-sentence-translation.test.js
+- node tests/gateway-provider.test.js
+- git diff --check
+
+git diff --check 仅输出工作区 LF/CRLF 提示，未发现 diff whitespace error。
+
+3. 本地 Gateway Skill Version
+
+已确认本地 gateway/app/skills/sentence_translation.py 中：
+SKILL_VERSION = "sentence-translation-v1.1"
+
+已确认本地 sentence-translation-skill.js 中：
+skillVersion = "sentence-translation-v1.1"
+
+已确认本地 Prompt 边界包含：
+- targetText 是唯一翻译目标；
+- contextSentence 仅作为辅助上下文；
+- context 可以消解 target 内部术语、指代和省略，但不能增加 target 之外的独立内容；
+- translation 字段不得输出 contextSentence 中超出 targetText 的标题、编号、前后句、相邻段落或正文；
+- keyTerm.term 必须来自 targetText，keyTerm.meaning 可以参考 contextSentence。
+
+4. 使用的实际部署方式
+
+未执行部署。
+
+原因：
+当前环境中 gcloud 命令不可用。执行 gcloud config get-value project 与 gcloud run services describe 时均返回：
+无法将“gcloud”项识别为 cmdlet、函数、脚本文件或可运行程序的名称。
+
+同时检查常见 Cloud SDK 安装路径：
+- C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd
+- C:\Users\aning\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd
+
+结果均不存在。
+
+根据本轮部署安全要求：如果 Python 环境、依赖或 gcloud 登录不可用，不伪造通过，停止在部署前。因此本轮未执行 Cloud Run 部署命令。
+
+5. 新 Revision 名称
+
+未创建新 Revision。
+
+6. 流量分配
+
+未读取到 Cloud Run 当前服务配置，也未改变流量分配。
+
+7. Service URL 是否保持不变
+
+本轮没有执行任何 Cloud Run 修改，因此未改变 Service URL。
+
+已知目标 URL：
+https://translator-gateway-beta-268073468344.asia-northeast1.run.app
+
+由于 gcloud 不可用，未能通过 Cloud Run describe 命令远程确认。
+
+8. Secret、Service Account 和运行配置是否保持不变
+
+本轮没有执行 Cloud Run 部署或配置修改，因此没有主动改变 Secret、Service Account、CPU、Memory、Timeout、Concurrency、Min/Max instances、Ingress 或访问策略。
+
+由于 gcloud 不可用，未能读取部署前/部署后配置并做远程比对。
+
+9. 日志检查结果
+
+未执行 Cloud Run logs read。
+
+原因：
+gcloud 不可用。
+
+10. 是否执行认证烟雾测试
+
+未执行远程 /v1/language 认证烟雾测试。
+
+原因：
+部署未执行，且当前环境没有可用 gcloud 进行服务确认。本轮也未读取、输出或使用任何 Token、API Key、Secret 明文。
+
+11. 烟雾测试是否返回 sentence-translation-v1.1
+
+未验证。
+
+12. 翻译是否只对应 targetText
+
+远程未验证。
+
+本地测试已验证 Gateway Prompt 与 Provider payload 保持 targetText / contextSentence 职责分离。
+
+13. Cloud Run 是否部署成功
+
+未部署成功。
+
+准确状态：
+部署流程停止在“读取并保留当前 Cloud Run 配置”之前，因为 gcloud 命令不可用。
+
+旧 Revision 应继续正常服务；本轮未对 Cloud Run 执行任何变更。
+
+14. 用户仍需完成的 Chrome GUI 验收
+
+Cloud Run 重新部署成功后，用户仍需在 Chrome 中人工验证：
+- 重新加载扩展；
+- 刷新论文网页；
+- 测试 Graphical Abstract；
+- 测试 Structure of LLM Agent；
+- 测试 Definition of LLM Agent；
+- 预期只翻译实际选区，不附带章节编号、不附带标题下方正文；
+- 如返回中可见 skillVersion，应确认是 sentence-translation-v1.1。
+
+本轮尚未进行人工 Chrome GUI 验收。
+
+15. 未执行 git add / commit / push
+
+已确认：
+本轮未执行 git add、git commit、git push。
+
+16. 未重新生成朋友测试包
+
+已确认：
+本轮未重新生成朋友测试包。
+
+17. 当前风险与未完成项
+
+未完成项：
+- 安装或启用 Google Cloud SDK gcloud；
+- 登录具备目标项目 Cloud Run 部署权限的账号；
+- 重新执行 Cloud Run describe；
+- 使用 gateway/ 作为 source 目录重新部署 translator-gateway-beta；
+- 确认新 Revision 接管 100% 流量；
+- 执行日志检查；
+- 如有安全可用 Token，再执行远程 /v1/language 烟雾测试；
+- 最后由用户执行 Chrome GUI 验收。
+
+当前风险：
+- 远程 Gateway Beta 仍可能运行旧 Revision，因此远程用户可能仍看到旧的 sentenceTranslation 行为。
+- 本地代码已修复并通过测试，但未部署前不会影响 Cloud Run 线上服务。
+
+18. 给 ChatGPT 的快速上下文
+
+本地 Translator-plugin 已完成 sentenceTranslation target/context 职责分离修复，前端 sentence-translation-skill.js 与 gateway/app/skills/sentence_translation.py 均为 sentence-translation-v1.1。关键测试已通过。当前请求目标是重新部署 Cloud Run translator-gateway-beta 到 manifest-vault-452402-s8 / asia-northeast1，使远程 Gateway Beta 生效。但当前 Codex 环境没有 gcloud 命令，部署按安全要求停止在部署前。未改 Secret、Token、IAM、Cloud Run 配置、Git 历史或朋友测试包。

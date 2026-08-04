@@ -1,0 +1,173 @@
+1. 本轮基本信息
+
+项目：Translator-plugin
+仓库路径：D:\Project_Experimental\Translator_Plugin
+分支：feat/gateway-beta
+本轮任务：基于当前已切换到 Cloud Run 的未提交工作区，制作可直接发给朋友的 Chrome/Edge 远程 Beta 测试包，并生成中文 HTML 使用说明。
+当前插件远程 Gateway：https://translator-gateway-beta-268073468344.asia-northeast1.run.app
+manifest 版本：1.0.1
+执行边界：未 git add；未 git commit；未 git push；未升级 manifest 版本；未修改 Cloud Run；未修改 Secret Manager；未生成 CRX；未写入共享 Token。
+
+2. 本轮完成了什么
+
+新增可复用打包脚本：
+- tools/打包朋友测试版.ps1
+
+生成仓库外测试包目录：
+- D:\Project_Experimental\Translator_Plugin_Releases\Translator-plugin_CloudRun-Beta_20260723
+
+生成仓库外 ZIP：
+- D:\Project_Experimental\Translator_Plugin_Releases\Translator-plugin_CloudRun-Beta_20260723.zip
+
+测试包内新增中文 HTML 使用说明：
+- 使用说明_Chrome与Edge.html
+
+本轮测试包基于当前未提交的 Cloud Run 切换工作区生成，不是从旧 Git HEAD 打包。
+
+3. 测试包内容与排除内容
+
+包内文件数：21
+
+包内包含：
+- manifest.json
+- background.js
+- content.js
+- md5.js
+- ai-context-skill.js
+- sentence-translation-skill.js
+- baidu-translation-provider.js
+- deepseek-context-provider.js
+- gemini-context-provider.js
+- gateway-language-provider.js
+- translation-provider.js
+- popup.html / popup.css / popup.js
+- options.html / options.css / options.js
+- vocabulary.html / vocabulary.css / vocabulary.js
+- 使用说明_Chrome与Edge.html
+
+包内不包含：
+- gateway/ 服务端源码；
+- tests/；
+- report_log/；
+- docs/；
+- .git/ 或 .github/；
+- .env 或 .env.*；
+- .venv/；
+- Python 缓存；
+- Dockerfile 或 .dockerignore；
+- 本地启动 ps1/cmd；
+- README / CHANGELOG / PRIVACY / SECURITY；
+- Codex Prompt；
+- 开发报告；
+- 私密 Token TXT；
+- ZIP 以外的二进制发布物。
+
+4. HTML 使用说明内容
+
+HTML 文件：
+- D:\Project_Experimental\Translator_Plugin_Releases\Translator-plugin_CloudRun-Beta_20260723\使用说明_Chrome与Edge.html
+
+说明特点：
+- 中文；
+- UTF-8；
+- 单文件 HTML；
+- CSS 内嵌；
+- 无外部 CDN、字体、图片或脚本；
+- 离线可打开；
+- 响应式布局；
+- 可打印；
+- 不包含真实共享 Token、Gemini API Key、Secret Manager 内容、Google Cloud 项目信息或开发者私人信息。
+
+内容覆盖：
+- Beta 版本说明；
+- Chrome 安装步骤；
+- Edge 安装步骤；
+- 安装前准备；
+- 基本使用；
+- 如何确认连接成功；
+- 常见问题；
+- 隐私与安全说明；
+- 反馈问题时需要提供的信息；
+- Chrome / Edge 卸载方式。
+
+5. 自动验证结果
+
+已执行并通过：
+- PowerShell Parser 检查 tools/打包朋友测试版.ps1：通过；
+- node .\tests\gateway-provider.test.js：通过；
+- manifest 静态检查：通过；
+- Cloud Run URL 检查：gateway-language-provider.js 与 manifest 使用正确远程地址；
+- 打包脚本内置 manifest 验证：通过；
+- background.js importScripts 依赖验证：通过；
+- HTML 引用 JS/CSS 文件验证：通过；
+- staging 运行文件 URL 检查：通过；
+- staging 敏感信息扫描：通过；
+- ZIP 解压结构验证：通过；
+- ZIP 第一层为 Translator-plugin_CloudRun-Beta_20260723 文件夹；
+- 解压后包目录根部直接包含 manifest.json；
+- staging 与 ZIP 解压后的文件清单一致；
+- manifest.json SHA-256 一致性检查：通过；
+- 独立包内文件清单复核：通过；
+- 独立 ZIP entry 复核：通过；
+- 独立 staging 敏感扫描：RiskCount = 0；
+- git diff --check：无实际 whitespace error，仅 Windows LF/CRLF 提示；
+- 全量 tests/*.test.js Node 回归：全部通过。
+
+未执行：
+- 未实际把最终 ZIP 解压目录加载进 Chrome/Edge 做 GUI 验收；
+- 未真实调用 Cloud Run；
+- 未使用真实共享 Token；
+- 未修改 chrome.storage.local。
+
+6. 输出路径、ZIP 大小与 SHA-256
+
+测试包目录：
+D:\Project_Experimental\Translator_Plugin_Releases\Translator-plugin_CloudRun-Beta_20260723
+
+ZIP 文件：
+D:\Project_Experimental\Translator_Plugin_Releases\Translator-plugin_CloudRun-Beta_20260723.zip
+
+ZIP 大小：
+63866 bytes
+
+ZIP SHA-256：
+D9C66EF6D5706E41BF87F0A408BA245C67C885C279B1F7E684764835CA703FEE
+
+7. Git、安全、待人工验收
+
+Git 状态：
+- 本轮未 git add；
+- 本轮未 git commit；
+- 本轮未 git push；
+- 仓库内新增 tools/打包朋友测试版.ps1；
+- 本报告为本轮新增未跟踪 TXT；
+- Cloud Run URL 切换相关 6 个文件仍保持未提交工作区改动。
+
+安全状态：
+- 测试包不含完整共享 Beta Token；
+- 测试包不含 Gemini API Key；
+- 测试包不含 .env；
+- 测试包不含 gateway 服务端；
+- 测试包不含测试、报告、部署资料或私密文件；
+- Cloud Run 公开服务 URL 存在于运行代码中，这是客户端访问远程 Gateway 所必需，不属于秘密。
+
+用户后续人工验收清单：
+1. 将最终 ZIP 解压到一个新目录；
+2. 暂时禁用当前开发目录加载的扩展，避免两个版本混淆；
+3. 从解压目录重新“加载已解压的扩展程序”；
+4. 确认 options 页面可打开；
+5. 输入共享 Token；
+6. 确认当前 Provider 为 Gateway Beta；
+7. 测试 Word Quick；
+8. 测试 Word Detail；
+9. 测试 Sentence Translation；
+10. 测试加入生词本与 contextTranslation；
+11. 重启 Chrome 或 Edge 后再测试一次；
+12. 确认本地 Gateway 未运行；
+13. 确认 Cloud Run 日志出现新请求。
+
+只有最终 ZIP 解压目录也通过人工验收，才建议发送给朋友。
+
+8. 给 ChatGPT 的快速上下文
+
+朋友远程 Beta 测试包已生成。新增脚本 tools/打包朋友测试版.ps1，可重复生成仓库外目录 D:\Project_Experimental\Translator_Plugin_Releases\Translator-plugin_CloudRun-Beta_YYYYMMDD 和同名 ZIP。当前实际输出为 Translator-plugin_CloudRun-Beta_20260723，ZIP SHA-256 为 D9C66EF6D5706E41BF87F0A408BA245C67C885C279B1F7E684764835CA703FEE。包内只有扩展运行文件和 使用说明_Chrome与Edge.html，不含 gateway 服务端、tests、report_log、.env、Token 或 API Key。manifest 版本仍为 1.0.1，运行代码连接 Cloud Run Gateway。GatewayProvider 测试、全量 Node 回归、包完整性验证和敏感扫描均通过。本轮未 commit、未 push，等待用户从最终 ZIP 解压目录做 Chrome/Edge 人工验收。

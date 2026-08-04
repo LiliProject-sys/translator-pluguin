@@ -1,4 +1,4 @@
-﻿const assert = require("assert");
+const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
@@ -12,7 +12,7 @@ const deepseek = fs.readFileSync(path.join(projectRoot, "deepseek-context-provid
 const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
 function testManifestUnchanged() {
-  assert.equal(manifest.version, "1.0.2");
+  assert.equal(manifest.version, "1.0.4");
   assert.equal(manifest.manifest_version, 3);
 }
 

@@ -5,22 +5,26 @@ Translator-plugin Gateway Beta 本地服务说明
 当前范围：
 - 本地 FastAPI Gateway；
 - 本地 /health、/v1/auth/verify、/v1/language；
-- Gateway 固定调用 Gemini 模型 gemini-3.1-flash-lite；
+- Gateway 通过 GATEWAY_UPSTREAM_PROVIDER 在 Gemini 与 DeepSeek V4 Flash 之间选择上游；
 - Chrome 插件当前 Beta 默认连接 Cloud Run 远程 Gateway；
 - 本地 http://127.0.0.1:8000 仅用于开发调试。
 
 本阶段不包含：
 - 用户账号、注册、登录、支付；
 - 数据库、Redis、云端生词本；
-- DeepSeek 或百度中转；
+- 浏览器按请求选择 Gateway 上游模型（计划在第二阶段实现）；
 - 已部署的 Cloud Run 服务端本身；
 - 远程朋友 Beta 打包；
 - manifest 版本升级到 1.1.0。
 
 环境变量：
 - BETA_ACCESS_TOKEN：共享 Beta Token；
+- GATEWAY_UPSTREAM_PROVIDER：gemini 或 deepseek，缺失时默认 gemini；
 - GEMINI_API_KEY：服务端 Gemini Key；
 - GEMINI_MODEL：默认 gemini-3.1-flash-lite；
+- DEEPSEEK_API_KEY：服务端 DeepSeek Key；
+- DEEPSEEK_MODEL：默认 deepseek-v4-flash；
+- DEEPSEEK_BASE_URL：默认 https://api.deepseek.com；
 - PORT：本地或 Cloud Run 注入端口。
 
 本地开发推荐启动方式：
@@ -29,7 +33,7 @@ Translator-plugin Gateway Beta 本地服务说明
 脚本说明：
 - 自动定位 gateway/.venv/Scripts/python.exe；
 - 自动检查 gateway/.env 是否存在；
-- 自动检查 BETA_ACCESS_TOKEN、GEMINI_API_KEY、GEMINI_MODEL 是否存在且非空；
+- 自动检查 BETA_ACCESS_TOKEN，并按当前上游只检查 GEMINI_API_KEY 或 DEEPSEEK_API_KEY；
 - 显式通过 --env-file gateway/.env 加载本地配置；
 - 固定监听 http://127.0.0.1:8000；
 - /health 用于检查服务是否存活；
@@ -44,8 +48,10 @@ Translator-plugin Gateway Beta 本地服务说明
 - Dockerfile 的 COPY 路径均以 gateway/ 为根，不依赖仓库根目录；
 - 容器启动后监听 0.0.0.0，并读取 Cloud Run 注入的 PORT，默认回退 8080；
 - Cloud Run 不使用本地启动脚本，也不读取本地 .env，而是使用平台环境变量；
-- BETA_ACCESS_TOKEN 与 GEMINI_API_KEY 通过 Secret Manager 或等价安全方式注入；
-- GEMINI_MODEL 通过 Cloud Run 平台环境变量设置。
+- BETA_ACCESS_TOKEN、GEMINI_API_KEY 与 DEEPSEEK_API_KEY 通过 Secret Manager 或等价安全方式注入；
+- GATEWAY_UPSTREAM_PROVIDER、GEMINI_MODEL、DEEPSEEK_MODEL 与 DEEPSEEK_BASE_URL 通过 Cloud Run 平台环境变量设置；
+- DeepSeek Secret 建议命名为 translator-deepseek-api-key，Secret 值不得写入仓库或报告；
+- 第一阶段通过 Revision 级环境变量统一切换上游，旧扩展协议不变；验证通过后再增加前端按请求选择。
 
 隐私约束：
 - Token 只通过 Authorization: Bearer 发送；

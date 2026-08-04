@@ -21,11 +21,18 @@ FIXTURE_DIR = PROJECT_ROOT / "gateway" / "contracts" / "fixtures"
 
 
 class FakeGeminiClient:
+    provider_id = "gemini"
+
     def __init__(self):
         self.calls = []
 
-    def generate_json(self, prompt, schema_model, request_id):
-        self.calls.append({"prompt": prompt, "schema_model": schema_model, "request_id": request_id})
+    def generate_json(self, prompt, schema_model, request_id, max_output_tokens=None, telemetry=None):
+        self.calls.append({
+            "prompt": prompt,
+            "schema_model": schema_model,
+            "request_id": request_id,
+            "max_output_tokens": max_output_tokens,
+        })
         if schema_model.__name__ == "WordQuickAnalysis":
             return {
                 "word": "employed",
@@ -43,6 +50,10 @@ class FakeGeminiClient:
             "translation": "这些技术越来越多地被用于三维物体的生产。",
             "keyTerm": None,
         }
+
+
+class FakeDeepSeekClient(FakeGeminiClient):
+    provider_id = "deepseek"
 
 
 def route_endpoint(app, path, method):
@@ -102,6 +113,22 @@ class GatewayContractTests(unittest.TestCase):
         self.assertEqual(response["data"]["provider"], "gateway")
         self.assertEqual(response["data"]["upstreamProvider"], "gemini")
         self.assertNotIn("cached", response["data"])
+        self.assertEqual(self.fake_gemini.calls[0]["max_output_tokens"], 256)
+
+    def test_language_uses_injected_deepseek_upstream_without_contract_changes(self):
+        app = create_app(FakeDeepSeekClient())
+        language_endpoint = route_endpoint(app, "/v1/language", "POST")
+        payload = LanguageRequest.model_validate({
+            "requestId": "selection-deepseek-001",
+            "requestType": "wordAnalysis",
+            "analysisMode": "detail",
+            "text": "employed",
+            "contextSentence": "The method was employed for classification.",
+        })
+        response = asyncio.run(language_endpoint(payload, "valid-token"))
+        self.assertEqual(response["data"]["provider"], "gateway")
+        self.assertEqual(response["data"]["upstreamProvider"], "deepseek")
+        self.assertEqual(response["data"]["skillVersion"], "context-analysis-v6")
 
     def test_language_rejects_invalid_combination_and_unknown_fields(self):
         with self.assertRaises(ValidationError):

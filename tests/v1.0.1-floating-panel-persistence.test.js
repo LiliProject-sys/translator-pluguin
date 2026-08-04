@@ -7,7 +7,7 @@ const content = fs.readFileSync(path.join(projectRoot, "content.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "manifest.json"), "utf8"));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, "1.0.2");
+assert.equal(manifest.version, "1.0.4");
 
 assert.equal(content.includes("mouseleave"), false);
 assert.equal(content.includes("pointerleave"), false);

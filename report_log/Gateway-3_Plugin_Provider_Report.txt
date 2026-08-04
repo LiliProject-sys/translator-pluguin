@@ -1,0 +1,29 @@
+Gateway-3 Plugin Provider Report
+生成日期：2026-07-23
+编码：UTF-8
+
+阶段目标：
+- 新增插件侧 GatewayProvider；
+- 接入现有 providerRegistry；
+- 复用当前 CANCEL_LANGUAGE_REQUEST 链路；
+- 不修改 content.js 主链路。
+
+变更文件：
+- gateway-language-provider.js
+- translation-provider.js
+- background.js
+- manifest.json
+- tests/gateway-provider.test.js
+
+实现摘要：
+- Gateway URL 唯一源码定义在 gateway-language-provider.js。
+- 本地地址为 http://127.0.0.1:8000。
+- manifest 增加 http://127.0.0.1:8000/*。
+- Authorization 使用 Bearer Token。
+- Token 不进入语言请求 JSON body。
+- 语言请求 body 只白名单发送 requestId、requestType、analysisMode、sourceLanguage、targetLanguage、text、contextSentence、pageTitle。
+- requestId mismatch 映射为 GATEWAY_REQUEST_ID_MISMATCH。
+- AbortController 保存于 Provider 内部 Map，finally 清理。
+
+敏感信息：
+- 本报告不含完整 Token 或 API Key。
