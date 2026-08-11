@@ -11,6 +11,8 @@ stage*_docx_render_check/
 # Local editor and operating-system files
 .agents/
 .codex/
+.idea/
+.vscode/
 .DS_Store
 Thumbs.db
 *.tmp
@@ -44,6 +46,8 @@ vocabularyEntries*.json
 chrome-storage*.json
 local-storage*.json
 user-data/
+desktop/settings.json
+desktop/vocabulary.json
 
 # Private project notes that are not part of distributable source
 重要记录/

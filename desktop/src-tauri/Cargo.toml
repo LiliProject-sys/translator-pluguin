@@ -1,0 +1,59 @@
+[package]
+name = "orange-translator-desktop"
+version = "0.1.0"
+description = "Orange翻译 Windows 桌面端"
+authors = ["Orange翻译"]
+edition = "2021"
+
+[lib]
+name = "orange_translator_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+test = true
+bench = false
+
+[[bin]]
+name = "orange-translator-desktop"
+path = "src/main.rs"
+test = false
+bench = false
+
+[[test]]
+name = "stage1_core"
+path = "tests/stage1_core.rs"
+
+[[test]]
+name = "stage2_target"
+path = "tests/stage2_target.rs"
+
+[[test]]
+name = "stage3a_gateway"
+path = "tests/stage3a_gateway.rs"
+
+[[test]]
+name = "stage5_vocabulary"
+path = "tests/stage5_vocabulary.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+time = { version = "0.3", features = ["formatting", "parsing"] }
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_DataExchange",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Memory",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Accessibility",
+  "Win32_UI_WindowsAndMessaging",
+] }

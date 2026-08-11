@@ -1,0 +1,21 @@
+:root {
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  color: #111827;
+  background: #f5f7f6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+button {
+  font: inherit;
+}

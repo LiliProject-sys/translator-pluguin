@@ -1,0 +1,127 @@
+:root,
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+body { padding: 0; }
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 10px;
+  color: #111827;
+  background: #ffffff;
+}
+
+.source-text {
+  margin: 12px 14px 8px;
+  overflow: hidden;
+  color: #1f2937;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-text[hidden] + .result { margin-top: 12px; }
+
+.result {
+  flex: 1;
+  min-height: 0;
+  margin: 0 12px 12px;
+  padding: 8px 9px;
+  overflow: auto;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 4px;
+  color: #1f2937;
+  background: #f8fafc;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.result.is-loading { color: #64748b; }
+.result.is-word { border-left-color: #16a34a; }
+.result.is-sentence { border-left-color: #0f766e; }
+.result.is-error { border-left-color: #dc2626; color: #b91c1c; background: #fef2f2; }
+.state-label { margin: 0 0 8px; color: #64748b; font-size: 12px; font-weight: 600; }
+.result h1 { margin: 0 0 10px; font-size: 19px; }
+.result p { white-space: pre-wrap; }
+.loading-view p, .live-error-view p { margin: 0; }
+
+.analysis-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  padding: 2px 0;
+}
+.analysis-row > span { color: #64748b; font-size: 12px; font-weight: 600; }
+.analysis-row > strong { min-width: 0; color: #1f2937; font-weight: 400; white-space: pre-wrap; }
+.analysis-row.contextual-meaning { max-height: 88px; overflow-y: auto; }
+.live-detail-button {
+  width: max-content;
+  min-height: 28px;
+  margin: 8px 7px 0 0;
+  border: 1px solid #16a34a;
+  padding: 4px 9px;
+  color: #166534;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.word-actions { display: inline-flex; margin-top: 8px; }
+.save-vocabulary-button {
+  min-height: 28px;
+  margin-right: 7px;
+  border: 1px solid #86efac;
+  padding: 4px 9px;
+  color: #166534;
+  background: #f0fdf4;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.save-vocabulary-button:disabled { cursor: default; opacity: 0.72; }
+.live-detail-button:disabled { cursor: default; opacity: 0.78; }
+.live-detail-error { margin: 8px 0 0; color: #b91c1c; font-size: 12px; line-height: 1.45; }
+.live-detail-result { margin-top: 8px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+.analysis-row.is-detail { grid-template-columns: 72px minmax(0, 1fr); padding: 3px 0; }
+.analysis-row.is-separated-detail { margin-top: 7px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+
+.sentence-view > p { margin: 0; color: #134e4a; font-size: 14px; line-height: 1.65; }
+.key-term {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid #d1fae5;
+  color: #334155;
+}
+.key-term > span { color: #0f766e; font-weight: 600; }
+.key-term > strong { font-weight: 400; overflow-wrap: anywhere; }
+
+.captured-target { margin: 14px 0; padding: 10px 12px; border-radius: 8px; background: #ffffff; }
+.captured-target span, dt { color: #64748b; font-size: 11px; font-weight: 700; }
+.captured-target p { margin: 6px 0 0; color: #0f172a; white-space: pre-wrap; overflow-wrap: anywhere; }
+dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 18px 0; }
+dl div { padding: 10px; border-radius: 7px; background: #ffffff; }
+dd { margin: 4px 0 0; color: #134e4a; font-weight: 700; }
+.detail { margin-top: 18px; padding-top: 14px; border-top: 1px solid #d1fae5; }
+.detail h2 { margin: 0; color: #0f766e; font-size: 14px; }
+.detail p { color: #475569; line-height: 1.65; }
+.error-code { color: #b91c1c; font-size: 12px; }
+
+footer { display: flex; justify-content: flex-end; gap: 9px; padding: 0 14px 12px; }
+footer button { padding: 8px 12px; border-radius: 7px; background: #ffffff; cursor: pointer; }
+footer button:disabled { cursor: default; opacity: 0.6; }
+.secondary { border: 1px solid #16a34a; color: #166534; }
+.danger { border: 1px solid #fca5a5; color: #991b1b; }
