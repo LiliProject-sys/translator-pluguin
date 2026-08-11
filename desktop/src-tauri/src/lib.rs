@@ -1396,6 +1396,8 @@ mod stage3b_popup_tests {
         .unwrap();
         assert_eq!(success["phase"], "success");
         assert_eq!(success["result"]["kind"], "word");
+        assert_eq!(success["result"]["partOfSpeech"], "n.");
+        assert!(success["result"].get("part_of_speech").is_none());
         assert!(success["result"].get("provider").is_none());
         assert!(success["result"].get("upstreamProvider").is_none());
         assert!(success["result"].get("skillVersion").is_none());
@@ -1410,6 +1412,51 @@ mod stage3b_popup_tests {
         assert_eq!(error["errorKind"], "retryable");
         assert_eq!(error["message"], "翻译失败，请稍后重试");
         assert!(error.get("errorCode").is_none());
+    }
+
+    #[test]
+    fn sentence_popup_payload_serializes_key_term_in_camel_case() {
+        let target = target(RequestType::SentenceTranslation);
+        let parsed = GatewayParsedResult::Sentence {
+            provider: "gateway".into(),
+            upstream_provider: "provider".into(),
+            skill_version: "skill".into(),
+            translation: "神经毒剂测量。".into(),
+            key_term: Some(crate::app_state::GatewayKeyTerm {
+                term: "nerve agent".into(),
+                meaning: "神经毒剂".into(),
+            }),
+        };
+        let success = serde_json::to_value(LivePopupTranslationState::success(
+            &target,
+            "desktop-sentence-1".into(),
+            &parsed,
+        ))
+        .unwrap();
+
+        assert_eq!(success["result"]["kind"], "sentence");
+        assert_eq!(success["result"]["translation"], "神经毒剂测量。");
+        assert_eq!(success["result"]["keyTerm"]["term"], "nerve agent");
+        assert_eq!(success["result"]["keyTerm"]["meaning"], "神经毒剂");
+        assert!(success["result"].get("key_term").is_none());
+
+        let without_key_term = GatewayParsedResult::Sentence {
+            provider: "gateway".into(),
+            upstream_provider: "provider".into(),
+            skill_version: "skill".into(),
+            translation: "普通译文。".into(),
+            key_term: None,
+        };
+        let without_key_term = serde_json::to_value(LivePopupTranslationState::success(
+            &target,
+            "desktop-sentence-2".into(),
+            &without_key_term,
+        ))
+        .unwrap();
+
+        assert_eq!(without_key_term["result"]["translation"], "普通译文。");
+        assert!(without_key_term["result"]["keyTerm"].is_null());
+        assert!(without_key_term["result"].get("key_term").is_none());
     }
 
     #[test]
