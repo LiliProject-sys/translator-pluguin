@@ -6,6 +6,7 @@ use orange_translator_desktop_lib::app_state::{
 fn target(generation: u64, capture_generation: u64) -> LatestGatewayTarget {
     LatestGatewayTarget {
         target: "sample".into(),
+        binding: None,
         request_type: RequestType::WordAnalysis,
         page_title: String::new(),
         source_app: String::new(),
@@ -13,6 +14,7 @@ fn target(generation: u64, capture_generation: u64) -> LatestGatewayTarget {
         translation_generation: generation,
         captured_at_unix_ms: generation,
         context: ContextCaptureSnapshot::empty(ContextStatus::Unsupported),
+        translation_mode: orange_translator_desktop_lib::settings::TranslationMode::Fast,
     }
 }
 
@@ -105,6 +107,7 @@ fn retry_rejects_stale_nonfailed_nonretryable_and_disabled_requests() {
         .is_none());
 
     let disabled = AppState::default();
+    disabled.set_auto_translate(false).unwrap();
     let generation = disabled.next_translation_generation();
     prepare_failed_live_request(
         &disabled,

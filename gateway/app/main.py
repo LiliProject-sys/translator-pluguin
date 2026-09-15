@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -11,12 +13,11 @@ from .config import MAX_REQUEST_BODY_BYTES, settings
 from .errors import error_payload, gateway_error
 from .language_service import process_language_request
 from .schemas import LanguageRequest
-from .upstream import get_upstream_client
+from .upstream import get_upstream_client_for_mode
 
 
 def create_app(upstream_client=None) -> FastAPI:
     app = FastAPI(title="translator-gateway")
-    client = upstream_client or get_upstream_client(settings.gateway_upstream_provider)
 
     @app.middleware("http")
     async def limit_request_body(request: Request, call_next):
@@ -67,7 +68,23 @@ def create_app(upstream_client=None) -> FastAPI:
 
     @app.post("/v1/language")
     async def language(payload: LanguageRequest, token: str = Depends(require_beta_token)):
-        data = process_language_request(payload, client)
+        client = upstream_client or get_upstream_client_for_mode(payload.mode)
+        telemetry = {}
+        started = time.perf_counter()
+        succeeded = False
+        try:
+            data = process_language_request(payload, client, telemetry)
+            succeeded = True
+        finally:
+            # Explicit whitelist: never log input, prompts, responses or credentials.
+            diagnostic = {key: telemetry.get(key) for key in (
+                "translationMode", "provider", "resolvedModel", "reasoningMode",
+                "model", "thinking", "reasoningEffort", "retryCount",
+            )}
+            diagnostic.update(analysisMode=payload.analysisMode, requestType=payload.requestType,
+                              gatewayLatencyMs=round((time.perf_counter() - started) * 1000),
+                              success=succeeded)
+            logging.getLogger("uvicorn.error").info("translation_profile %s", json.dumps(diagnostic))
 
         return {
             "status": "ok",

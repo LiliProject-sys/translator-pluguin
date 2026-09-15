@@ -14,6 +14,7 @@ use std::sync::Mutex;
 fn target(generation: u64, request_type: RequestType) -> LatestGatewayTarget {
     LatestGatewayTarget {
         target: "warfare".into(),
+        binding: None,
         request_type,
         page_title: "Context page".into(),
         source_app: "Microsoft Word".into(),
@@ -28,6 +29,7 @@ fn target(generation: u64, request_type: RequestType) -> LatestGatewayTarget {
             context_length: 23,
             context_preview: "chemical warfare agents".into(),
         },
+        translation_mode: orange_translator_desktop_lib::settings::TranslationMode::Precise,
     }
 }
 
@@ -106,6 +108,7 @@ fn detail_request_reuses_original_target_context_and_gateway_whitelist() {
         vec![
             "analysisMode",
             "contextSentence",
+            "mode",
             "pageTitle",
             "requestId",
             "requestType",
@@ -114,6 +117,7 @@ fn detail_request_reuses_original_target_context_and_gateway_whitelist() {
             "text",
         ]
     );
+    assert_eq!(value["mode"], "precise");
 }
 
 #[test]
@@ -203,6 +207,19 @@ fn detail_claim_is_atomic_and_does_not_replace_quick_main_state() {
         .unwrap()
         .is_none());
     assert_eq!(state.gateway_test_state().unwrap(), before);
+}
+
+#[test]
+fn detail_claim_after_mode_switch_keeps_the_original_quick_profile() {
+    use orange_translator_desktop_lib::settings::TranslationMode;
+    let (state, target, quick_request_id) = ready_state();
+    assert_eq!(target.translation_mode, TranslationMode::Precise);
+    state.set_translation_mode(TranslationMode::UltraFast).unwrap();
+    let claim = state.claim_live_detail(target.translation_generation, &quick_request_id)
+        .unwrap().unwrap();
+    assert_eq!(claim.target.translation_mode, TranslationMode::Precise);
+    assert_eq!(build_detail_language_request(&claim.target, "detail".into()).unwrap().mode,
+               TranslationMode::Precise);
 }
 
 #[test]

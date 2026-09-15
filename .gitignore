@@ -51,3 +51,11 @@ desktop/vocabulary.json
 
 # Private project notes that are not part of distributable source
 重要记录/
+
+# Private release inputs, research artifacts and generated portable packages.
+report_log/
+release_output/
+desktop/helpers/**/bin/
+desktop/helpers/**/obj/
+orange_user_lexicon.db*
+translation-settings.json

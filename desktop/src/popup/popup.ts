@@ -6,6 +6,9 @@ import type {
   LivePopupTranslationState,
   MockTranslationState,
   VocabularySaveResult,
+  OverrideEditorView,
+  PopupTranslationResult,
+  RuntimeState,
 } from "../shared/contracts";
 import { EVENTS } from "../shared/contracts";
 import "../shared/base.css";
@@ -29,10 +32,20 @@ app.innerHTML = `
       </section>
       <section id="loading-view" class="loading-view"><p id="loading-message">正在处理…</p></section>
       <section id="word-view" class="analysis-view" hidden>
+        <section id="quick-fields">
         <div class="analysis-row"><span>单词</span><strong id="word-display"></strong></div>
         <div class="analysis-row"><span>音标</span><strong id="word-phonetic"></strong></div>
         <div class="analysis-row"><span>词性</span><strong id="word-part-of-speech"></strong></div>
-        <div class="analysis-row contextual-meaning"><span>含义</span><strong id="word-meaning"></strong></div>
+        <div class="analysis-row contextual-meaning"><span>含义 <button id="edit-override" class="edit-override" type="button" title="修正个人词条" aria-label="修正个人词条">✎</button></span><strong id="word-meaning"></strong></div>
+        </section>
+        <form id="override-editor" class="override-editor" hidden>
+          <div class="analysis-row"><span>单词</span><strong id="edit-target"></strong></div>
+          <label class="analysis-row"><span>音标</span><input id="edit-phonetic" autocomplete="off" maxlength="256" aria-label="音标"></label>
+          <label class="analysis-row"><span>词性</span><input id="edit-pos" autocomplete="off" placeholder="如 n./v.，可留空" aria-label="词性"></label>
+          <label class="analysis-row"><span>含义</span><textarea id="edit-meaning" rows="4" required aria-label="含义"></textarea></label>
+          <div class="edit-actions"><button id="restore-override" type="button" hidden>恢复默认</button><button id="cancel-override" type="button">取消</button><button id="save-override" type="submit">保存</button></div>
+        </form>
+        <p id="override-notice" class="override-notice" role="status" hidden></p>
         <div class="word-actions">
           <button id="save-vocabulary" class="save-vocabulary-button" type="button">加入生词本</button>
         </div>
@@ -100,6 +113,131 @@ const liveErrorMessage = document.querySelector<HTMLElement>("#live-error-messag
 const liveErrorActions = document.querySelector<HTMLElement>("#live-error-actions")!;
 const liveRetry = document.querySelector<HTMLButtonElement>("#live-retry")!;
 const openSettings = document.querySelector<HTMLButtonElement>("#open-settings")!;
+const quickFields = document.querySelector<HTMLElement>("#quick-fields")!;
+const editButton = document.querySelector<HTMLButtonElement>("#edit-override")!;
+const editor = document.querySelector<HTMLFormElement>("#override-editor")!;
+const editTarget = document.querySelector<HTMLElement>("#edit-target")!;
+const editPhonetic = document.querySelector<HTMLInputElement>("#edit-phonetic")!;
+const editPos = document.querySelector<HTMLInputElement>("#edit-pos")!;
+const editMeaning = document.querySelector<HTMLTextAreaElement>("#edit-meaning")!;
+const restoreOverride = document.querySelector<HTMLButtonElement>("#restore-override")!;
+const cancelOverride = document.querySelector<HTMLButtonElement>("#cancel-override")!;
+const saveOverride = document.querySelector<HTMLButtonElement>("#save-override")!;
+const overrideNotice = document.querySelector<HTMLElement>("#override-notice")!;
+let editSession: OverrideEditorView | null = null;
+let editEpoch = 0;
+let editBusy = false;
+let minimumCapture = 0;
+let autoEnabled = true;
+let quickRevision = 0;
+let quickAvailable = false;
+
+function notice(message: string): void {
+  overrideNotice.hidden = !message;
+  overrideNotice.textContent = message;
+}
+
+function editingBusy(busy: boolean): void {
+  editBusy = busy;
+  editButton.disabled = busy;
+  saveOverride.disabled = busy;
+  restoreOverride.disabled = busy;
+  cancelOverride.disabled = busy;
+  editPhonetic.disabled = busy;
+  editPos.disabled = busy;
+  editMeaning.disabled = busy;
+  saveVocabularyButton.disabled = busy;
+}
+
+function discardEditor(): void {
+  editEpoch++;
+  editSession = null;
+  editor.hidden = true;
+  quickFields.hidden = false;
+  editTarget.textContent = "";
+  editPhonetic.value = editPos.value = editMeaning.value = "";
+  editingBusy(false);
+  notice("");
+}
+
+function sameQuick(quick: NonNullable<typeof latestQuickWord>): boolean {
+  return latestQuickWord?.generation === quick.generation
+    && latestQuickWord?.captureGeneration === quick.captureGeneration
+    && latestQuickWord?.requestId === quick.requestId;
+}
+
+editButton.addEventListener("click", async () => {
+  const quick = latestQuickWord;
+  if (!quick || !quickAvailable || quick.result.kind !== "word" || editBusy) return;
+  discardEditor();
+  const epoch = editEpoch;
+  editingBusy(true);
+  try {
+    const view = await invoke<OverrideEditorView>("get_current_override", {
+      generation: quick.generation, quickRequestId: quick.requestId,
+    });
+    if (epoch !== editEpoch || !sameQuick(quick)) return;
+    editSession = view;
+    editTarget.textContent = view.target;
+    editPhonetic.value = view.fields.phonetic;
+    editPos.value = view.fields.partOfSpeech;
+    editMeaning.value = view.fields.meaning;
+    restoreOverride.hidden = !view.hasOverride;
+    quickFields.hidden = true;
+    editor.hidden = false;
+    editingBusy(false);
+    editMeaning.focus();
+  } catch {
+    if (epoch === editEpoch) { editingBusy(false); notice("无法编辑，请重新划词后重试"); }
+  }
+});
+cancelOverride.addEventListener("click", () => { if (!editBusy) discardEditor(); });
+editor.addEventListener("submit", (event) => { event.preventDefault(); void commitEdit(false); });
+restoreOverride.addEventListener("click", () => void commitEdit(true));
+
+async function commitEdit(restore: boolean): Promise<void> {
+  const quick = latestQuickWord;
+  const session = editSession;
+  const epoch = editEpoch;
+  if (!quick || !session || editBusy || (restore && !session.hasOverride)) return;
+  const fields = { ...session.fields, phonetic: editPhonetic.value.trim(),
+    partOfSpeech: editPos.value.trim(), meaning: editMeaning.value.trim() };
+  if (!restore && (!fields.meaning || Array.from(fields.meaning).length > 300)) {
+    notice("含义不能为空，且最多 300 字"); return;
+  }
+  editingBusy(true);
+  notice("");
+  try {
+    const updated = await invoke<PopupTranslationResult | null>(restore ? "remove_current_override" : "save_current_override", {
+      generation: quick.generation, quickRequestId: quick.requestId, sessionId: session.sessionId,
+      ...(restore ? {} : { fields }),
+    });
+    if (epoch !== editEpoch || !sameQuick(quick)) return;
+    discardEditor();
+    quickRevision++;
+    if (updated?.kind === "word") {
+      latestQuickWord = { ...quick, result: updated };
+      wordDisplay.textContent = formatLemmaDisplay(updated.lemma, quick.target, updated.word);
+      wordPhonetic.textContent = updated.phonetic || "-";
+      wordPartOfSpeech.textContent = updated.partOfSpeech || "-";
+      wordMeaning.textContent = updated.meaning;
+      resetVocabularySave();
+      notice(restore ? "已恢复默认" : "已保存到个人词典");
+    } else {
+      quickAvailable = false;
+      quickFields.hidden = true;
+      editButton.disabled = true;
+      saveVocabularyButton.disabled = true;
+      notice("已删除个人修正；本地暂无默认词条，请重新划词获取结果");
+      // Retain identity only for Detail; hidden old fields cannot be edited/saved.
+    }
+  } catch (error) {
+    if (epoch === editEpoch && sameQuick(quick)) {
+      editingBusy(false);
+      notice(typeof error === "string" ? error : "保存失败，请重试");
+    }
+  }
+}
 
 let latestGeneration = 0;
 let latestLiveError: Extract<LivePopupTranslationState, { phase: "error" }> | null = null;
@@ -143,15 +281,17 @@ function formatLemmaDisplay(lemma: string, target: string, word: string): string
   const normalizedTarget = target.trim();
   if (!normalizedLemma) return word.trim() || normalizedTarget || "-";
   if (!normalizedTarget || normalizedLemma.toLocaleLowerCase() === normalizedTarget.toLocaleLowerCase()) {
-    return normalizedLemma;
+    return normalizedTarget || normalizedLemma;
   }
   return `${normalizedLemma} (${normalizedTarget})`;
 }
 
 function renderMock(payload: MockTranslationState): void {
   if (!payload.mock || payload.generation < latestGeneration) return;
+  discardEditor();
   latestGeneration = payload.generation;
   latestQuickWord = null;
+  quickAvailable = false;
   resetVocabularySave();
   resetLiveDetail();
   hideAllViews();
@@ -186,12 +326,16 @@ function renderMock(payload: MockTranslationState): void {
 
 function renderLive(payload: LivePopupTranslationState): void {
   if (payload.generation < latestGeneration) return;
+  if (!autoEnabled || payload.captureGeneration < minimumCapture) return;
+  discardEditor();
+  quickRevision++;
   latestGeneration = payload.generation;
   hideAllViews();
   sourceText.hidden = false;
   sourceText.textContent = payload.target;
   latestLiveError = null;
   latestQuickWord = null;
+  quickAvailable = false;
   resetVocabularySave();
 
   if (payload.phase === "loading") {
@@ -226,6 +370,7 @@ function renderLive(payload: LivePopupTranslationState): void {
     wordPartOfSpeech.textContent = payload.result.partOfSpeech || "-";
     wordMeaning.textContent = payload.result.meaning || "-";
     latestQuickWord = payload;
+    quickAvailable = true;
     resetLiveDetail();
     return;
   }
@@ -327,7 +472,8 @@ liveDetailButton.addEventListener("click", async () => {
 
 saveVocabularyButton.addEventListener("click", async () => {
   const quick = latestQuickWord;
-  if (!quick || quick.result.kind !== "word") return;
+  if (!quick || !quickAvailable || quick.result.kind !== "word") return;
+  const revision = quickRevision;
   saveVocabularyButton.disabled = true;
   saveVocabularyButton.textContent = "正在保存…";
   try {
@@ -335,10 +481,10 @@ saveVocabularyButton.addEventListener("click", async () => {
       generation: quick.generation,
       quickRequestId: quick.requestId,
     });
-    if (latestQuickWord?.requestId !== quick.requestId) return;
+    if (!sameQuick(quick) || revision !== quickRevision) return;
     saveVocabularyButton.textContent = saved.status === "updated" ? "已更新" : "已加入";
   } catch {
-    if (latestQuickWord?.requestId === quick.requestId) {
+    if (sameQuick(quick) && revision === quickRevision) {
       saveVocabularyButton.disabled = false;
       saveVocabularyButton.textContent = "保存失败，请重试";
     }
@@ -350,6 +496,24 @@ async function initialize(): Promise<void> {
   await listen<MockTranslationState>(EVENTS.translationStateChanged, (event) => renderMock(event.payload));
   await listen<LivePopupTranslationState>(EVENTS.popupTranslationState, (event) => renderLive(event.payload));
   await listen<LiveDetailPopupState>(EVENTS.popupDetailState, (event) => renderLiveDetail(event.payload));
+  await listen<number>(EVENTS.popupSelectionInvalidated, (event) => {
+    minimumCapture = Math.max(minimumCapture, event.payload);
+    if (latestQuickWord && latestQuickWord.captureGeneration >= event.payload) return;
+    discardEditor();
+    latestQuickWord = null;
+    editButton.disabled = true;
+    saveVocabularyButton.disabled = true;
+    liveDetailButton.disabled = true;
+  });
+  await listen<RuntimeState>(EVENTS.autoTranslateChanged, (event) => {
+    autoEnabled = event.payload.autoTranslateEnabled;
+    if (latestQuickWord) minimumCapture = Math.max(minimumCapture, latestQuickWord.captureGeneration + 1);
+    discardEditor();
+    latestQuickWord = null;
+    editButton.disabled = true;
+    saveVocabularyButton.disabled = true;
+    liveDetailButton.disabled = true;
+  });
   await invoke("set_popup_listener_ready", { ready: true });
 }
 

@@ -31,6 +31,21 @@ fn source(url: Option<&str>) -> VocabularySource {
     }
 }
 
+#[test]
+fn local_optional_fields_survive_vocabulary_save_and_reload() {
+    let path=temp_path("local-fields").join("vocabulary.json");
+    let repository=VocabularyRepository::new(path.clone());
+    let mut local=candidate("saw","",None);
+    local.phonetic.clear();local.part_of_speech="n./v.".into();
+    repository.upsert(local).unwrap();
+    let loaded=VocabularyRepository::new(path.clone()).load().unwrap();
+    assert_eq!(loaded.entries[0].key,"saw");
+    assert!(loaded.entries[0].lemma.is_empty());
+    assert!(loaded.entries[0].phonetic.is_empty());
+    assert_eq!(loaded.entries[0].part_of_speech,"n./v.");
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
 fn candidate(word: &str, lemma: &str, detail: Option<VocabularyDetail>) -> VocabularyCandidate {
     VocabularyCandidate {
         word: word.into(),
@@ -57,6 +72,7 @@ fn detail() -> VocabularyDetail {
 fn live_target(generation: u64) -> LatestGatewayTarget {
     LatestGatewayTarget {
         target: "employed".into(),
+        binding: None,
         request_type: RequestType::WordAnalysis,
         page_title: "Document".into(),
         source_app: "Microsoft Word".into(),
@@ -71,6 +87,7 @@ fn live_target(generation: u64) -> LatestGatewayTarget {
             context_length: 31,
             context_preview: "They employed a careful method.".into(),
         },
+        translation_mode: orange_translator_desktop_lib::settings::TranslationMode::Precise,
     }
 }
 

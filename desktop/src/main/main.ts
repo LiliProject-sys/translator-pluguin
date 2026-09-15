@@ -8,6 +8,7 @@ import type {
   MockScenario,
   RuntimeState,
   SettingsView,
+  TranslationMode,
   TargetDiagnostics,
   VocabularyEntry,
   VocabularyExportResult,
@@ -83,6 +84,10 @@ app.innerHTML = `
             <div class="wide"><dt>当前前台窗口</dt><dd id="diag-system-foreground">—</dd></div>
           </dl>
           <h3 class="diagnostic-section-title">最近一次外部 TARGET 捕获</h3>
+          <h3 class="diagnostic-section-title">Quick 生命周期（与捕获状态分开）</h3>
+          <pre id="diag-quick-state" class="diagnostic-json"></pre>
+          <h3 class="diagnostic-section-title">HostAdapter Snapshot（WPS exact 上下文进入 Quick）</h3>
+          <pre id="diag-host-snapshot" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:32rem;overflow:auto">尚无 Snapshot。</pre>
           <p id="diag-external-empty" class="muted">尚无外部捕获记录。</p>
           <dl id="diag-external" class="diagnostic-grid" hidden>
             <div><dt>阶段</dt><dd id="diag-stage">Idle</dd></div>
@@ -148,6 +153,15 @@ app.innerHTML = `
       </section>
       <section class="page placeholder" data-page="settings">
         <p class="eyebrow">SETTINGS</p><h1>设置</h1>
+        <div class="placeholder-card settings-card translation-mode-card">
+          <h2>翻译模式</h2>
+          <div class="translation-mode-toggle" role="group" aria-label="翻译模式">
+            <button type="button" data-translation-mode="ultra_fast" class="is-active" aria-pressed="true">超极速</button>
+            <button type="button" data-translation-mode="fast" aria-pressed="false">Fast</button>
+            <button type="button" data-translation-mode="precise" aria-pressed="false">精准</button>
+          </div>
+          <p class="muted">超极速：最快响应　Fast：深度推理　精准：当前精准模式</p>
+        </div>
         <div class="placeholder-card settings-card">
           <h2>访问码</h2>
           <div id="settings-access-panel" class="settings-access-panel" data-state="unset" role="status">
@@ -182,7 +196,7 @@ const vocabularyDetail = document.querySelector<HTMLElement>("#vocabulary-detail
 const importVocabularyButton = document.querySelector<HTMLButtonElement>("#import-vocabulary")!;
 const exportVocabularyButton = document.querySelector<HTMLButtonElement>("#export-vocabulary")!;
 
-let settingsState: SettingsView = { schemaVersion: 1, gatewayAccessConfigured: false };
+let settingsState: SettingsView = { schemaVersion: 1, gatewayAccessConfigured: false, translationMode: "ultra_fast" };
 let gatewayState: GatewayTestState = { connectionState: "idle", parseStatus: "notAttempted" };
 type AccessCodeUiState = "unset" | "verifying" | "success" | "failure";
 let accessCodeUiState: AccessCodeUiState = "unset";
@@ -368,7 +382,11 @@ function diagnosticField(id: string): HTMLElement {
   return document.querySelector<HTMLElement>(`#${id}`)!;
 }
 
+let renderedCaptureGeneration = 0;
 function renderDiagnostic(diagnostics: TargetDiagnostics): void {
+  const generation = diagnostics.externalCapture?.captureGeneration ?? 0;
+  if (generation < renderedCaptureGeneration) return;
+  renderedCaptureGeneration = generation;
   const system = diagnostics.systemEvent;
   diagnosticField("diag-hook").textContent = system.hookReady ? "Ready" : "Failed";
   diagnosticField("diag-event").textContent = system.lastMouseEvent;
@@ -379,6 +397,15 @@ function renderDiagnostic(diagnostics: TargetDiagnostics): void {
     : "—";
 
   const external = diagnostics.externalCapture;
+  const host = external?.hostCapture;
+  diagnosticField("diag-quick-state").textContent = JSON.stringify({
+    state: external?.quickState ?? "notStarted", reason: external?.quickReason ?? "",
+    timingMs: external?.quickTimingMs ?? {},
+    localDictionary: external?.localDictionary ?? null,
+    popupPosition: external?.popupPosition ?? null,
+  }, null, 2);
+  diagnosticField("diag-host-snapshot").textContent = host
+    ? JSON.stringify(host, null, 2) : "尚无 Snapshot。";
   document.querySelector<HTMLElement>("#diag-external")!.hidden = !external;
   document.querySelector<HTMLElement>("#diag-external-empty")!.hidden = Boolean(external);
   if (!external) {
@@ -448,8 +475,30 @@ function renderSettings(settings: SettingsView, uiState?: AccessCodeUiState): vo
   settingsState = settings;
   accessCodeUiState = uiState ?? (settings.gatewayAccessConfigured ? "success" : "unset");
   renderAccessCodeState();
+  document.querySelectorAll<HTMLButtonElement>("[data-translation-mode]").forEach((button) => {
+    const active = button.dataset.translationMode === settings.translationMode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
   renderGateway(gatewayState);
 }
+
+document.querySelectorAll<HTMLButtonElement>("[data-translation-mode]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const mode = button.dataset.translationMode as TranslationMode;
+    if (mode === settingsState.translationMode) return;
+    document.querySelectorAll<HTMLButtonElement>("[data-translation-mode]").forEach((item) => { item.disabled = true; });
+    try {
+      const settings = await invoke<SettingsView>("set_translation_mode", { mode });
+      renderSettings(settings);
+      mainMessage.textContent = `翻译模式已切换为${button.textContent}。`;
+    } catch {
+      mainMessage.textContent = "翻译模式保存失败，请稍后重试。";
+    } finally {
+      document.querySelectorAll<HTMLButtonElement>("[data-translation-mode]").forEach((item) => { item.disabled = false; });
+    }
+  });
+});
 
 function renderGateway(state: GatewayTestState): void {
   gatewayState = state;

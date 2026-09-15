@@ -93,6 +93,7 @@ pub struct LanguageRequest {
     pub text: String,
     pub context_sentence: String,
     pub page_title: String,
+    pub mode: crate::settings::TranslationMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -281,8 +282,18 @@ impl<T: GatewayTransport> GatewayClient<T> {
         access_token: &str,
         request: &LanguageRequest,
     ) -> Result<(u16, GatewayParsedResult), GatewayFailure> {
+        self.send_language_observed(access_token, request, |_| {})
+    }
+
+    pub fn send_language_observed(
+        &self, access_token: &str, request: &LanguageRequest,
+        observe_parse_ms: impl FnOnce(u64),
+    ) -> Result<(u16, GatewayParsedResult), GatewayFailure> {
         let (response, data) = self.send_language_envelope(access_token, request)?;
-        let parsed = parse_data(request.request_type, data, &response.body, response.status)?;
+        let started = std::time::Instant::now();
+        let parsed = parse_data(request.request_type, data, &response.body, response.status);
+        observe_parse_ms(started.elapsed().as_millis() as u64);
+        let parsed = parsed?;
         Ok((response.status, parsed))
     }
 
@@ -358,6 +369,7 @@ pub fn build_language_request(
         text: target.target.clone(),
         context_sentence: target.context.context_sentence.chars().take(5000).collect(),
         page_title: target.page_title.chars().take(300).collect(),
+        mode: target.translation_mode,
     })
 }
 
@@ -659,6 +671,7 @@ mod tests {
     fn target(request_type: RequestType) -> LatestGatewayTarget {
         LatestGatewayTarget {
             target: "sample".into(),
+            binding: None,
             request_type,
             page_title: "Notepad".into(),
             source_app: "Notepad".into(),
@@ -666,6 +679,7 @@ mod tests {
             translation_generation: 8,
             captured_at_unix_ms: 9,
             context: ContextCaptureSnapshot::empty(ContextStatus::Unsupported),
+            translation_mode: crate::settings::TranslationMode::Precise,
         }
     }
 
@@ -710,6 +724,7 @@ mod tests {
             vec![
                 "analysisMode",
                 "contextSentence",
+                "mode",
                 "pageTitle",
                 "requestId",
                 "requestType",
@@ -719,6 +734,7 @@ mod tests {
             ]
         );
         assert_eq!(value["analysisMode"], "quick");
+        assert_eq!(value["mode"], "precise");
         assert_eq!(value["contextSentence"], "");
         assert_eq!(value["sourceLanguage"], "en");
         assert_eq!(value["targetLanguage"], "zh-CN");

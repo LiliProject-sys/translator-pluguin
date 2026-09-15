@@ -3,12 +3,14 @@ from __future__ import annotations
 from .config import settings
 from .deepseek_client import DeepSeekClient
 from .gemini_client import GeminiClient
+from .translation_profiles import (
+    SENTENCE_TRANSLATION_MAX_TOKENS,
+    WORD_DETAIL_MAX_TOKENS,
+    WORD_QUICK_MAX_TOKENS,
+    resolve_translation_profile,
+)
 
 SUPPORTED_UPSTREAM_PROVIDERS = frozenset({"gemini", "deepseek"})
-
-WORD_QUICK_MAX_TOKENS = 256
-WORD_DETAIL_MAX_TOKENS = 512
-SENTENCE_TRANSLATION_MAX_TOKENS = 8192
 
 
 def normalize_upstream_provider(provider_id: str | None) -> str:
@@ -25,9 +27,9 @@ def get_upstream_client(provider_id: str | None = None):
     return GeminiClient()
 
 
-def get_max_output_tokens(request_type: str, analysis_mode: str) -> int:
-    if request_type == "sentenceTranslation":
-        return SENTENCE_TRANSLATION_MAX_TOKENS
-    if analysis_mode == "detail":
-        return WORD_DETAIL_MAX_TOKENS
-    return WORD_QUICK_MAX_TOKENS
+def get_upstream_client_for_mode(mode: str):
+    profile = resolve_translation_profile(mode)
+    factories = {"deepseek": DeepSeekClient, "gemini": GeminiClient}
+    client = factories[profile.provider](model=profile.model)
+    client.translation_profile = profile
+    return client

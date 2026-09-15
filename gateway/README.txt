@@ -23,7 +23,7 @@ Translator-plugin Gateway Beta 本地服务说明
 - GEMINI_API_KEY：服务端 Gemini Key；
 - GEMINI_MODEL：默认 gemini-3.1-flash-lite；
 - DEEPSEEK_API_KEY：服务端 DeepSeek Key；
-- DEEPSEEK_MODEL：默认 deepseek-v4-flash；
+- DEEPSEEK_MODEL：默认 deepseek-flash；
 - DEEPSEEK_BASE_URL：默认 https://api.deepseek.com；
 - PORT：本地或 Cloud Run 注入端口。
 
@@ -58,3 +58,20 @@ Translator-plugin Gateway Beta 本地服务说明
 - 语言请求 body 只允许 requestId、requestType、analysisMode、sourceLanguage、targetLanguage、text、contextSentence、pageTitle；
 - 不发送 pageUrl、userQuestion、Prompt、模型名、Gateway URL、Gemini API Key 或整页正文；
 - 日志不得记录完整用户文本、完整 Prompt、完整模型响应、Token 或 API Key。
+
+Translation Mode v2（2026-09-15）补充，以下覆盖旧阶段路由说明：
+- /v1/language 的 mode 支持 ultra_fast / fast / precise。
+- ultra_fast：DeepSeek Flash，thinking disabled，不发送 reasoning_effort。
+- fast：同一 DeepSeek 模型和正式 Skill，thinking enabled + reasoning_effort max。
+- precise：现有 Gemini 模型、Prompt、请求和解析保持不变。
+- 路由配置集中在 app/translation_profiles.py；DeepSeek 两档沿用 Lab 的非流式 JSON 请求，不指定 max_tokens。
+- Desktop 新配置或缺 mode 默认 ultra_fast；已明确保存的 fast/precise 不迁移。
+- 未传 mode 的旧 Gateway 调用仍默认 precise，避免影响旧浏览器客户端。
+- 正式 DeepSeek Detail 保留 V12；Quick 和句子继续各自原有 Skill；不导入 Lab 默认 V1。
+- Gateway 本地 translation_profile 日志仅包含模式、模型、推理配置、耗时和成功状态，无正文。
+- 桌面正式地址仍为远程 Gateway；新桌面启用 ultra_fast 前，需要另行授权部署兼容服务端。
+# Release authentication: one Bearer code per client, multiple server-side codes.
+# BETA_ACCESS_TOKEN remains valid. Optional BETA_ACCESS_TOKENS is a JSON array
+# of nonempty strings from Secret Manager; duplicates are removed. Malformed
+# JSON fails startup; an empty combined allowlist rejects every request.
+# Never put real codes in this file, examples, fixtures, or portable artifacts.

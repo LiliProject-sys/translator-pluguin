@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from gateway.app.config import settings
 from gateway.app.deepseek_client import DeepSeekClient
 from gateway.app.language_service import process_language_request
-from gateway.app.schemas import LanguageRequest, SentenceTranslation, WordQuickAnalysis
+from gateway.app.schemas import LanguageRequest, SentenceTranslation, WordDetailAnalysis, WordQuickAnalysis
 from gateway.app.upstream import (
     SENTENCE_TRANSLATION_MAX_TOKENS,
     WORD_DETAIL_MAX_TOKENS,
@@ -70,8 +70,11 @@ class RecordingClient:
     def __init__(self):
         self.calls = []
 
-    def generate_json(self, prompt, schema_model, request_id, max_output_tokens=None, telemetry=None):
-        self.calls.append((schema_model.__name__, max_output_tokens))
+    def generate_json(
+        self, prompt, schema_model, request_id, max_output_tokens=None, telemetry=None,
+        thinking_type=None, reasoning_effort=None,
+    ):
+        self.calls.append((schema_model.__name__, max_output_tokens, thinking_type, reasoning_effort))
         if schema_model.__name__ == "WordQuickAnalysis":
             return json.loads(quick_json())
         if schema_model.__name__ == "WordDetailAnalysis":
@@ -80,6 +83,38 @@ class RecordingClient:
 
 
 class DeepSeekClientTests(unittest.TestCase):
+    @patch("gateway.app.deepseek_client.urllib.request.urlopen")
+    def test_business_profiles_reach_wire_and_keep_schemas(self, urlopen):
+        self.client.model = settings.deepseek_model
+        sentence = "The researchers proposed an innovative framework for the problem."
+        cases = [
+            ("wordAnalysis", "quick", "innovative", json.loads(quick_json()), "enabled", "max", "context-analysis-v6"),
+            ("sentenceTranslation", "quick", sentence, {"translation": "测试译文", "keyTerm": None}, "enabled", "max", "sentence-translation-v1.1"),
+            ("wordAnalysis", "detail", "innovative", {"meaningInSentence": "测试释义", "comparison": None}, "enabled", "max", "deepseek-v4-flash-context-v12"),
+        ]
+        for request_type, mode, text, result, thinking, effort, skill in cases:
+            with self.subTest(request_type=request_type, mode=mode):
+                urlopen.return_value = FakeResponse(completion(json.dumps(result)))
+                payload = LanguageRequest(
+                    requestId="profile-test", requestType=request_type, analysisMode=mode,
+                    text=text, contextSentence=sentence, mode="fast",
+                )
+                telemetry = {}
+                output = process_language_request(payload, self.client, telemetry)
+                body = json.loads(urlopen.call_args.args[0].data)
+                self.assertEqual(body["thinking"], {"type": thinking})
+                if effort is None:
+                    self.assertNotIn("reasoning_effort", body)
+                else:
+                    self.assertEqual(body["reasoning_effort"], effort)
+                self.assertEqual(telemetry["reasoningEffort"], effort)
+                self.assertEqual(output["skillVersion"], skill)
+                self.assertEqual(body["response_format"], {"type": "json_object"})
+                self.assertFalse(body["stream"])
+                if mode == "detail":
+                    self.assertNotIn("max_tokens", body)
+                self.assertNotIn("reasoning_content", json.dumps(output))
+
     def setUp(self):
         self.client = DeepSeekClient(
             api_key="fake-deepseek-key-for-tests",
@@ -263,22 +298,23 @@ class DeepSeekClientTests(unittest.TestCase):
         client = RecordingClient()
         requests = [
             LanguageRequest.model_validate({
-                "requestId": "quick", "requestType": "wordAnalysis", "analysisMode": "quick", "text": "employed"
+                "requestId": "quick", "mode": "fast", "requestType": "wordAnalysis", "analysisMode": "quick", "text": "employed"
             }),
             LanguageRequest.model_validate({
-                "requestId": "detail", "requestType": "wordAnalysis", "analysisMode": "detail", "text": "employed"
+                "requestId": "detail", "mode": "fast", "requestType": "wordAnalysis", "analysisMode": "detail", "text": "employed"
             }),
             LanguageRequest.model_validate({
-                "requestId": "sentence", "requestType": "sentenceTranslation", "analysisMode": "quick", "text": "A sentence."
+                "requestId": "sentence", "mode": "fast", "requestType": "sentenceTranslation", "analysisMode": "quick", "text": "A sentence."
             }),
         ]
         results = [process_language_request(request, client) for request in requests]
         self.assertEqual(client.calls, [
-            ("WordQuickAnalysis", WORD_QUICK_MAX_TOKENS),
-            ("WordDetailAnalysis", WORD_DETAIL_MAX_TOKENS),
-            ("SentenceTranslation", SENTENCE_TRANSLATION_MAX_TOKENS),
+            ("WordQuickAnalysis", None, "enabled", "max"),
+            ("WordDetailAnalysis", None, "enabled", "max"),
+            ("SentenceTranslation", None, "enabled", "max"),
         ])
         self.assertEqual(results[0]["skillVersion"], "context-analysis-v6")
+        self.assertEqual(results[1]["skillVersion"], "deepseek-v4-flash-context-v12")
         self.assertEqual(results[2]["skillVersion"], "sentence-translation-v1.1")
         self.assertTrue(all(result["upstreamProvider"] == "deepseek" for result in results))
 
@@ -295,6 +331,25 @@ class DeepSeekClientTests(unittest.TestCase):
         self.assertEqual(result["translation"], "句子译文。")
         body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
         self.assertEqual(body["max_tokens"], 8192)
+
+    @patch("gateway.app.deepseek_client.urllib.request.urlopen")
+    def test_v12_detail_profile_uses_low_reasoning_without_max_tokens(self, urlopen):
+        payload = json.dumps(
+            {"meaningInSentence": "采用。", "comparison": None}, ensure_ascii=False
+        )
+        urlopen.return_value = FakeResponse(completion(payload))
+        self.client.generate_json(
+            {"system": "detail", "user": {"targetText": "employed"}},
+            WordDetailAnalysis,
+            "request-detail-v12",
+            max_output_tokens=None,
+            thinking_type="enabled",
+            reasoning_effort="low",
+        )
+        body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(body["thinking"], {"type": "enabled"})
+        self.assertEqual(body["reasoning_effort"], "low")
+        self.assertNotIn("max_tokens", body)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ class LanguageRequest(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
     contextSentence: Optional[str] = Field(default=None, max_length=5000)
     pageTitle: Optional[str] = Field(default=None, max_length=300)
+    mode: Literal["ultra_fast", "fast", "precise"] = "precise"
 
     @field_validator("requestId", "sourceLanguage", "targetLanguage", "text", "contextSentence", "pageTitle", mode="before")
     @classmethod

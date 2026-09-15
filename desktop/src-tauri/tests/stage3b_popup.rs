@@ -38,6 +38,7 @@ fn live_gateway_state_rejects_an_old_translation_generation() {
     state
         .set_latest_gateway_target(LatestGatewayTarget {
             target: "old".into(),
+            binding: None,
             request_type: RequestType::WordAnalysis,
             page_title: String::new(),
             source_app: String::new(),
@@ -45,6 +46,7 @@ fn live_gateway_state_rejects_an_old_translation_generation() {
             translation_generation: old_generation,
             captured_at_unix_ms: 1,
             context: ContextCaptureSnapshot::empty(ContextStatus::Unsupported),
+            translation_mode: orange_translator_desktop_lib::settings::TranslationMode::Precise,
         })
         .unwrap();
     state
@@ -72,12 +74,14 @@ fn completion_and_new_generation_are_linearized_while_old_result_is_retained() {
         .set_latest_gateway_target(LatestGatewayTarget {
             target: "old".into(),
             request_type: RequestType::WordAnalysis,
+            binding: None,
             page_title: String::new(),
             source_app: String::new(),
             capture_generation: 1,
             translation_generation: old_generation,
             captured_at_unix_ms: 1,
             context: ContextCaptureSnapshot::empty(ContextStatus::Unsupported),
+            translation_mode: orange_translator_desktop_lib::settings::TranslationMode::Precise,
         })
         .unwrap();
     state
@@ -117,6 +121,7 @@ fn completion_and_new_generation_are_linearized_while_old_result_is_retained() {
         let published = selection_state
             .set_latest_gateway_target(LatestGatewayTarget {
                 target: "new".into(),
+                binding: None,
                 request_type: RequestType::WordAnalysis,
                 page_title: String::new(),
                 source_app: String::new(),
@@ -124,6 +129,7 @@ fn completion_and_new_generation_are_linearized_while_old_result_is_retained() {
                 translation_generation: new_generation,
                 captured_at_unix_ms: 2,
                 context: ContextCaptureSnapshot::empty(ContextStatus::Unsupported),
+                translation_mode: orange_translator_desktop_lib::settings::TranslationMode::Precise,
             })
             .unwrap();
         published_tx.send(published).unwrap();

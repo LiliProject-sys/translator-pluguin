@@ -17,8 +17,15 @@ def extract_bearer_token(authorization: Optional[str]) -> str:
 
 
 def verify_token_value(token: str) -> None:
-    configured_token = settings.beta_access_token
-    if not configured_token or not hmac.compare_digest(token, configured_token):
+    matched = False
+    try:
+        supplied = token.encode("utf-8")
+        for configured in settings.valid_access_tokens:
+            # Compare every allowlisted value; Unicode input must never cause 500.
+            matched |= hmac.compare_digest(supplied, configured.encode("utf-8"))
+    except UnicodeError:
+        matched = False
+    if not matched:
         raise gateway_error(401, "INVALID_ACCESS_TOKEN", "测试访问码无效", True)
 
 

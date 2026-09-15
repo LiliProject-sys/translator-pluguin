@@ -40,6 +40,8 @@ class DeepSeekClient:
         request_id: str,
         max_output_tokens: int | None = None,
         telemetry: dict | None = None,
+        thinking_type: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict:
         if not self.api_key:
             raise gateway_error(
@@ -58,6 +60,8 @@ class DeepSeekClient:
                 request_id,
                 max_output_tokens,
                 max(0.001, deadline - time.monotonic()),
+                thinking_type or DEEPSEEK_THINKING_TYPE,
+                reasoning_effort or DEEPSEEK_REASONING_EFFORT,
             )
             choice = first_choice(response_data, request_id)
             finish_reason = str(choice.get("finish_reason") or "").strip().lower()
@@ -99,7 +103,15 @@ class DeepSeekClient:
                 ) from exc
 
             if telemetry is not None:
-                telemetry.update(extract_usage_telemetry(response_data, self.model, retry_count))
+                telemetry.update(
+                    extract_usage_telemetry(
+                        response_data,
+                        self.model,
+                        retry_count,
+                        thinking_type or DEEPSEEK_THINKING_TYPE,
+                        reasoning_effort or DEEPSEEK_REASONING_EFFORT,
+                    )
+                )
             return result
 
     def _request(
@@ -108,6 +120,8 @@ class DeepSeekClient:
         request_id: str,
         max_output_tokens: int | None,
         timeout_seconds: float,
+        thinking_type: str,
+        reasoning_effort: str,
     ) -> dict:
         body = {
             "model": self.model,
@@ -115,11 +129,12 @@ class DeepSeekClient:
                 {"role": "system", "content": prompt["system"]},
                 {"role": "user", "content": json.dumps(prompt["user"], ensure_ascii=False)},
             ],
-            "thinking": {"type": DEEPSEEK_THINKING_TYPE},
-            "reasoning_effort": DEEPSEEK_REASONING_EFFORT,
+            "thinking": {"type": thinking_type},
             "response_format": {"type": "json_object"},
             "stream": False,
         }
+        if thinking_type == "enabled":
+            body["reasoning_effort"] = reasoning_effort
         if max_output_tokens is not None:
             body["max_tokens"] = int(max_output_tokens)
 
@@ -192,12 +207,18 @@ def map_upstream_http_error(status: int, request_id: str):
     return gateway_error(502, "UPSTREAM_REQUEST_REJECTED", "DeepSeek 请求被拒绝", False, request_id)
 
 
-def extract_usage_telemetry(response_data: dict, model: str, retry_count: int) -> dict:
+def extract_usage_telemetry(
+    response_data: dict,
+    model: str,
+    retry_count: int,
+    thinking_type: str = DEEPSEEK_THINKING_TYPE,
+    reasoning_effort: str = DEEPSEEK_REASONING_EFFORT,
+) -> dict:
     usage = response_data.get("usage") if isinstance(response_data.get("usage"), dict) else {}
     return {
         "model": str(response_data.get("model") or model),
-        "thinking": DEEPSEEK_THINKING_TYPE,
-        "reasoningEffort": DEEPSEEK_REASONING_EFFORT,
+        "thinking": thinking_type,
+        "reasoningEffort": reasoning_effort if thinking_type == "enabled" else None,
         "inputTokens": usage.get("prompt_tokens"),
         "outputTokens": usage.get("completion_tokens"),
         "totalTokens": usage.get("total_tokens"),

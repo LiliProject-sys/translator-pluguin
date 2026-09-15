@@ -1,5 +1,5 @@
 use crate::{
-    settings::SettingsRepository,
+    settings::{SettingsRepository, TranslationMode},
     vocabulary::{
         VocabularyCandidate, VocabularyComparison, VocabularyDetail, VocabularyError,
         VocabularyRepository, VocabularySource,
@@ -152,6 +152,12 @@ impl Default for SystemEventDiagnostic {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalCaptureDiagnostic {
+    pub popup_position: Option<crate::popup_position::PositionDiagnostic>,
+    pub quick_state: String,
+    pub quick_reason: String,
+    pub quick_timing_ms: std::collections::BTreeMap<String, u64>,
+    pub local_dictionary: Option<crate::dictionary::LookupDiagnostic>,
+    pub host_capture: Option<crate::host_adapter::SelectionRuntimeState>,
     pub candidate_type: Option<CandidateType>,
     pub stage: DiagnosticStage,
     pub result: DiagnosticResult,
@@ -181,6 +187,12 @@ impl ExternalCaptureDiagnostic {
     ) -> Self {
         Self {
             candidate_type: Some(candidate_type),
+            popup_position: None,
+            quick_state: "notStarted".into(),
+            quick_reason: String::new(),
+            quick_timing_ms: Default::default(),
+            local_dictionary: None,
+            host_capture: None,
             stage: DiagnosticStage::CandidateDetected,
             result: DiagnosticResult::None,
             reason_code: String::new(),
@@ -246,6 +258,7 @@ pub enum ContextStatus {
 #[serde(rename_all = "camelCase")]
 pub enum ContextSource {
     Uia,
+    Snapshot,
     Empty,
 }
 
@@ -254,6 +267,7 @@ pub enum ContextSource {
 pub enum ContextUnit {
     Paragraph,
     Line,
+    Sentence,
     None,
 }
 
@@ -285,6 +299,8 @@ impl ContextCaptureSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LatestGatewayTarget {
+    #[serde(skip)]
+    pub binding: Option<crate::selection_bridge::QuickBinding>,
     pub target: String,
     pub request_type: RequestType,
     pub page_title: String,
@@ -293,6 +309,7 @@ pub struct LatestGatewayTarget {
     pub translation_generation: u64,
     pub captured_at_unix_ms: u64,
     pub context: ContextCaptureSnapshot,
+    pub translation_mode: TranslationMode,
 }
 
 impl LatestGatewayTarget {
@@ -796,8 +813,33 @@ pub struct StatusToast {
     pub generation: u64,
 }
 
+#[derive(Debug, Clone)]
+struct OverrideEditSession {
+    session_id: u64,
+    target: LatestGatewayTarget,
+    request_id: String,
+    original: Option<GatewayParsedResult>,
+    active: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverrideEditorView {
+    pub session_id: u64,
+    pub target: String,
+    pub fields: crate::dictionary::LocalDictionaryEntry,
+    pub has_override: bool,
+}
+
 pub struct AppState {
+    override_edit: Mutex<Option<OverrideEditSession>>,
+    override_sequence: AtomicU64,
+    active_capture: AtomicU64,
+    current_snapshot_id: Mutex<Option<String>>,
+    claimed_snapshot_id: Mutex<Option<String>>,
+    capture_epoch: AtomicU64,
     auto_translate_enabled: Mutex<bool>,
+    translation_mode: Mutex<TranslationMode>,
     main_section: Mutex<MainSection>,
     translation_generation: AtomicU64,
     translation_commit: Mutex<()>,
@@ -817,7 +859,14 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            override_edit: Mutex::new(None),
+            override_sequence: AtomicU64::new(0),
+            active_capture: AtomicU64::new(0),
+            current_snapshot_id: Mutex::new(None),
+            claimed_snapshot_id: Mutex::new(None),
             auto_translate_enabled: Mutex::new(true),
+            capture_epoch: AtomicU64::new(0),
+            translation_mode: Mutex::new(TranslationMode::default()),
             main_section: Mutex::new(MainSection::Home),
             translation_generation: AtomicU64::new(0),
             translation_commit: Mutex::new(()),
@@ -837,6 +886,88 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Capture/pause and the local write share this lock: no check/write TOCTOU.
+    pub fn begin_override_edit(&self, generation: u64, request_id: &str,
+        dictionary: &crate::dictionary::DictionaryService) -> Result<OverrideEditorView, String> {
+        let _commit = self.translation_commit.lock().map_err(|_| "编辑状态不可用")?;
+        let gateway = self.gateway_test_state.lock().map_err(|_| "翻译状态不可用")?;
+        let target = self.override_target(&gateway, generation, request_id)?;
+        let quick = gateway.parsed_result.as_ref().ok_or("请重新划词")?;
+        let GatewayParsedResult::Word { lemma, phonetic, part_of_speech, meaning, upstream_provider, .. } = quick else { return Err("仅支持单词修正".into()); };
+        let existing = dictionary.get_override(&target.target).map_err(|_| "个人词典读取失败")?;
+        let mut fields = existing.clone().unwrap_or(crate::dictionary::LocalDictionaryEntry {
+            lemma: lemma.clone(), phonetic: phonetic.clone(), part_of_speech: part_of_speech.clone(), meaning: meaning.clone(),
+        });
+        if existing.is_none() {
+            let detail = self.live_detail_state.lock().map_err(|_| "详细解释状态不可用")?;
+            if detail.phase == LiveDetailPhase::Success && detail.target.as_ref() == Some(&target)
+                && detail.quick_request_id.as_deref() == Some(request_id) {
+                if let Some(result) = &detail.result { fields.meaning = result.meaning_in_sentence.clone(); }
+            }
+        }
+        let mut session = self.override_edit.lock().map_err(|_| "编辑状态不可用")?;
+        let original = session.as_ref().filter(|s| s.target == target && s.request_id == request_id)
+            .and_then(|s| s.original.clone()).or_else(|| (upstream_provider != "user_override").then(|| quick.clone()));
+        let session_id = self.override_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        *session = Some(OverrideEditSession { session_id, target: target.clone(), request_id: request_id.into(), original, active: true });
+        Ok(OverrideEditorView { session_id, target: target.target, fields, has_override: existing.is_some() })
+    }
+
+    fn override_target(&self, gateway: &GatewayTestState, generation: u64, request_id: &str) -> Result<LatestGatewayTarget, String> {
+        let target = gateway.latest_target.as_ref().ok_or("选词已失效，请重新划词")?;
+        if target.binding.is_none() || !self.is_current_quick(target) || !self.is_auto_translate_enabled()
+            || target.translation_generation != generation || gateway.request_id.as_deref() != Some(request_id)
+            || target.request_type != RequestType::WordAnalysis || gateway.connection_state != GatewayConnectionState::Success
+            || !matches!(gateway.parsed_result, Some(GatewayParsedResult::Word { .. })) {
+            return Err("选词已失效，请重新划词".into());
+        }
+        Ok(target.clone())
+    }
+
+    pub fn commit_override_edit(&self, generation: u64, request_id: &str, session_id: u64,
+        dictionary: &crate::dictionary::DictionaryService,
+        fields: Option<crate::dictionary::LocalDictionaryEntry>) -> Result<Option<PopupTranslationResult>, String> {
+        let _commit = self.translation_commit.lock().map_err(|_| "编辑状态不可用")?;
+        let mut gateway = self.gateway_test_state.lock().map_err(|_| "翻译状态不可用")?;
+        let target = self.override_target(&gateway, generation, request_id)?;
+        let mut session = self.override_edit.lock().map_err(|_| "编辑状态不可用")?;
+        let session = session.as_mut().filter(|s| s.active && s.session_id == session_id
+            && s.target == target && s.request_id == request_id).ok_or("编辑已失效，请重新打开修正")?;
+        let parsed = if let Some(mut fields) = fields {
+            fields.lemma = fields.lemma.trim().into(); fields.phonetic = fields.phonetic.trim().into();
+            fields.part_of_speech = fields.part_of_speech.trim().into(); fields.meaning = fields.meaning.trim().into();
+            if !fields.validate() { return Err("含义须为 1–300 字；词性请使用 n./v./adj./adv./prep./phr. 或留空".into()); }
+            dictionary.set_override(&target.target, &fields).map_err(|_| "个人词典保存失败，请重试")?;
+            Some(fields.display(&target.target, "user_override", "user-override-v1"))
+        } else {
+            dictionary.remove_override(&target.target).map_err(|_| "恢复默认失败，请重试")?;
+            // Keep other scopes intact. A pre-existing lexical correction may now
+            // become the winning entry after deleting an exact correction.
+            let base = dictionary.resolve(&target.target);
+            let restored = base.entry.map(|entry| entry.display(&target.target, &base.diagnostic.quick_source, &base.diagnostic.dictionary_version))
+                .or_else(|| session.original.clone());
+            restored
+        };
+        gateway.parsed_result = parsed.clone();
+        session.active = false;
+        Ok(parsed.as_ref().map(PopupTranslationResult::from))
+    }
+
+    pub fn translation_mode(&self) -> Result<TranslationMode, String> {
+        self.translation_mode
+            .lock()
+            .map(|mode| *mode)
+            .map_err(|_| "translation mode lock failed".into())
+    }
+
+    pub fn set_translation_mode(&self, mode: TranslationMode) -> Result<(), String> {
+        *self
+            .translation_mode
+            .lock()
+            .map_err(|_| "translation mode lock failed")? = mode;
+        Ok(())
+    }
+
     pub fn runtime(&self) -> Result<RuntimeState, String> {
         Ok(RuntimeState {
             auto_translate_enabled: *self
@@ -852,6 +983,8 @@ impl AppState {
     }
 
     pub fn set_auto_translate(&self, enabled: bool) -> Result<RuntimeState, String> {
+        let _commit = self.translation_commit.lock()
+            .map_err(|_| "translation commit lock failed")?;
         if enabled && !self.target_capture_available.load(Ordering::SeqCst) {
             return Err("TARGET 捕获不可用".into());
         }
@@ -859,10 +992,13 @@ impl AppState {
             .auto_translate_enabled
             .lock()
             .map_err(|_| "runtime state lock failed")? = enabled;
+        self.capture_epoch.fetch_add(1, Ordering::SeqCst);
         self.runtime()
     }
 
     pub fn toggle_auto_translate(&self) -> Result<RuntimeState, String> {
+        let _commit = self.translation_commit.lock()
+            .map_err(|_| "translation commit lock failed")?;
         let mut guard = self
             .auto_translate_enabled
             .lock()
@@ -871,6 +1007,7 @@ impl AppState {
             return Err("TARGET 捕获不可用".into());
         }
         *guard = !*guard;
+        self.capture_epoch.fetch_add(1, Ordering::SeqCst);
         let enabled = *guard;
         drop(guard);
         let mut runtime = self.runtime()?;
@@ -884,6 +1021,8 @@ impl AppState {
             .map(|value| *value)
             .unwrap_or(false)
     }
+
+    pub fn capture_epoch(&self) -> u64 { self.capture_epoch.load(Ordering::SeqCst) }
 
     pub fn set_main_section(&self, section: MainSection) -> Result<(), String> {
         *self
@@ -905,7 +1044,25 @@ impl AppState {
         self.translation_generation.load(Ordering::SeqCst) == generation
     }
 
+    pub fn is_current_quick(&self, target: &LatestGatewayTarget) -> bool {
+        self.is_current_translation(target.translation_generation)
+            && target.binding.as_ref().is_none_or(|binding| {
+                binding.capture_epoch == self.capture_epoch()
+                    && self.active_capture.load(Ordering::SeqCst) == target.capture_generation
+                    && self.current_snapshot_id.lock().map(|id|
+                        id.as_deref() == Some(binding.snapshot.id())).unwrap_or(false)
+            })
+    }
+
+    // Serialize selection replacement with the existing UI operation, not with network I/O.
+    pub fn with_current_quick<T>(&self, target: &LatestGatewayTarget,
+        operation: impl FnOnce() -> T) -> Option<T> {
+        let _commit = self.translation_commit.lock().ok()?;
+        (self.is_current_quick(target) && self.is_auto_translate_enabled()).then(operation)
+    }
+
     pub fn mark_target_capture_unavailable(&self) {
+        let Ok(_commit) = self.translation_commit.lock() else { return; };
         self.target_capture_available.store(false, Ordering::SeqCst);
         if let Ok(mut enabled) = self.auto_translate_enabled.lock() {
             *enabled = false;
@@ -920,6 +1077,16 @@ impl AppState {
         &self,
         target: LatestGatewayTarget,
     ) -> Result<GatewayTestState, String> {
+        let _commit = self.translation_commit.lock().map_err(|_| "translation commit lock failed")?;
+        if let Some(binding) = &target.binding {
+            if !self.is_current_translation(target.translation_generation)
+                || self.active_capture.load(Ordering::SeqCst) != target.capture_generation
+                || binding.capture_epoch != self.capture_epoch() || !self.is_auto_translate_enabled() {
+                return Err("stale_snapshot".into());
+            }
+        }
+        *self.current_snapshot_id.lock().map_err(|_| "snapshot lock failed")? =
+            target.binding.as_ref().map(|b| b.snapshot.id().to_owned());
         let mut state = self
             .gateway_test_state
             .lock()
@@ -941,7 +1108,7 @@ impl AppState {
             .translation_commit
             .lock()
             .map_err(|_| "translation commit lock failed")?;
-        if !self.is_current_translation(target.translation_generation) {
+        if !self.is_auto_translate_enabled() || !self.is_current_quick(target) {
             return Ok(false);
         }
         let gateway = self
@@ -992,13 +1159,10 @@ impl AppState {
             return Ok(None);
         };
         let eligible = target.translation_generation == generation
+            && self.is_current_quick(&target)
             && target.request_type == RequestType::WordAnalysis
             && gateway.request_id.as_deref() == Some(quick_request_id)
-            && gateway.connection_state == GatewayConnectionState::Success
-            && matches!(
-                gateway.parsed_result,
-                Some(GatewayParsedResult::Word { .. })
-            );
+            && gateway.connection_state == GatewayConnectionState::Success;
         if !eligible {
             return Ok(None);
         }
@@ -1047,7 +1211,8 @@ impl AppState {
             .live_detail_state
             .lock()
             .map_err(|_| "detail state lock failed")?;
-        if detail.phase != LiveDetailPhase::Error
+        if !self.is_current_quick(latest_target)
+            || detail.phase != LiveDetailPhase::Error
             || detail.detail_request_id.as_deref() != Some(failed_detail_request_id)
             || detail
                 .target
@@ -1057,10 +1222,6 @@ impl AppState {
             || detail.target.as_ref() != Some(latest_target)
             || gateway.request_id.as_deref() != detail.quick_request_id.as_deref()
             || gateway.connection_state != GatewayConnectionState::Success
-            || !matches!(
-                gateway.parsed_result,
-                Some(GatewayParsedResult::Word { .. })
-            )
         {
             return Ok(None);
         }
@@ -1100,10 +1261,6 @@ impl AppState {
             .map_err(|_| "gateway state lock failed")?;
         if gateway.request_id.as_deref() != Some(quick_request_id)
             || gateway.connection_state != GatewayConnectionState::Success
-            || !matches!(
-                gateway.parsed_result,
-                Some(GatewayParsedResult::Word { .. })
-            )
         {
             return Ok(None);
         }
@@ -1120,7 +1277,11 @@ impl AppState {
         let Some(target) = detail.target.as_ref() else {
             return Ok(None);
         };
-        if target.translation_generation != generation {
+        if target.translation_generation != generation
+            || !self.is_auto_translate_enabled()
+            || !self.is_current_quick(target)
+            || gateway.latest_target.as_ref() != Some(target)
+        {
             return Ok(None);
         }
         let quick_request_id = detail.quick_request_id.clone().unwrap_or_default();
@@ -1170,33 +1331,39 @@ impl AppState {
         quick_request_id: &str,
         detail_request_id: &str,
     ) -> bool {
-        self.is_current_translation(generation)
-            && self
-                .gateway_test_state
-                .lock()
-                .map(|gateway| {
-                    gateway.request_id.as_deref() == Some(quick_request_id)
-                        && gateway.connection_state == GatewayConnectionState::Success
-                        && matches!(
-                            gateway.parsed_result,
-                            Some(GatewayParsedResult::Word { .. })
-                        )
-                })
-                .unwrap_or(false)
-            && self
-                .live_detail_state
-                .lock()
-                .map(|detail| {
-                    detail.detail_request_id.as_deref() == Some(detail_request_id)
-                        && detail.quick_request_id.as_deref() == Some(quick_request_id)
-                        && matches!(
-                            detail.phase,
-                            LiveDetailPhase::Loading
-                                | LiveDetailPhase::Success
-                                | LiveDetailPhase::Error
-                        )
-                })
-                .unwrap_or(false)
+        if !self.is_auto_translate_enabled() || !self.is_current_translation(generation) {
+            return false;
+        }
+        let Ok(gateway) = self.gateway_test_state.lock() else { return false; };
+        let Ok(detail) = self.live_detail_state.lock() else { return false; };
+        gateway.request_id.as_deref() == Some(quick_request_id)
+            && gateway.connection_state == GatewayConnectionState::Success
+            // prepare_live_detail already established word eligibility. Subsequent
+            // local Quick edits/restores must not affect this independent binding.
+            && detail.target.as_ref().is_some_and(|target| {
+                target.translation_generation == generation && self.is_current_quick(target)
+            })
+            && detail.target == gateway.latest_target
+            && detail.detail_request_id.as_deref() == Some(detail_request_id)
+            && detail.quick_request_id.as_deref() == Some(quick_request_id)
+            && matches!(detail.phase,
+                LiveDetailPhase::Loading | LiveDetailPhase::Success | LiveDetailPhase::Error)
+    }
+
+    /// Serialize the final Detail publication with capture/pause invalidation.
+    /// The closure must not call synchronous window getters or reenter state commits.
+    pub fn with_current_live_detail<T>(
+        &self,
+        generation: u64,
+        quick_request_id: &str,
+        detail_request_id: &str,
+        publish: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let _commit = self.translation_commit.lock().ok()?;
+        if !self.is_current_live_detail(generation, quick_request_id, detail_request_id) {
+            return None;
+        }
+        Some(publish())
     }
 
     pub fn live_detail_phase(&self) -> LiveDetailPhase {
@@ -1347,6 +1514,7 @@ impl AppState {
         if state.request_id.as_deref() != Some(request_id)
             || latest_generation != Some(translation_generation)
             || !self.is_current_translation(translation_generation)
+            || state.latest_target.as_ref().is_some_and(|target| !self.is_current_quick(target))
         {
             return Ok(None);
         }
@@ -1363,7 +1531,7 @@ impl AppState {
             .lock()
             .map_err(|_| "translation commit lock failed")?;
         if !self.is_auto_translate_enabled()
-            || !self.is_current_translation(target.translation_generation)
+            || !self.is_current_quick(target)
         {
             return Ok(None);
         }
@@ -1373,6 +1541,11 @@ impl AppState {
             .map_err(|_| "gateway state lock failed")?;
         if state.latest_target.as_ref() != Some(target) {
             return Ok(None);
+        }
+        if let Some(binding) = &target.binding {
+            let mut claimed = self.claimed_snapshot_id.lock().map_err(|_| "snapshot claim lock failed")?;
+            if claimed.as_deref() == Some(binding.snapshot.id()) { return Ok(None); }
+            *claimed = Some(binding.snapshot.id().to_owned());
         }
         Ok(Some(self.claim_live_gateway_request_locked(
             &mut state,
@@ -1401,6 +1574,7 @@ impl AppState {
             return Ok(None);
         };
         if target.translation_generation != translation_generation
+            || !self.is_current_quick(&target)
             || state.request_id.as_deref() != Some(request_id)
             || state.connection_state != GatewayConnectionState::Failed
             || state.live_error_kind != Some(LivePopupErrorKind::Retryable)
@@ -1473,6 +1647,10 @@ impl AppState {
         foreground_title: String,
         foreground_pid: u32,
     ) -> Result<TargetDiagnostics, String> {
+        let _commit = self.translation_commit.lock().map_err(|_| "translation commit lock failed")?;
+        self.active_capture.store(capture_generation, Ordering::SeqCst);
+        self.translation_generation.fetch_add(1, Ordering::SeqCst);
+        *self.current_snapshot_id.lock().map_err(|_| "snapshot lock failed")? = None;
         let mut diagnostics = self
             .target_diagnostics
             .lock()

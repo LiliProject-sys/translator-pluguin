@@ -1,0 +1,10 @@
+# Source deploy allowlist: no local experiments, secrets, or user data.
+*
+!Dockerfile
+!requirements.txt
+!app/
+!app/**
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.env.*

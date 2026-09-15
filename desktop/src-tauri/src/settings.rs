@@ -6,12 +6,24 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TranslationMode {
+    #[default]
+    #[serde(rename = "ultra_fast")]
+    UltraFast,
+    Fast,
+    Precise,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
     pub schema_version: u32,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub gateway_access_token: String,
+    #[serde(default)]
+    pub translation_mode: TranslationMode,
 }
 
 impl Default for Settings {
@@ -19,6 +31,7 @@ impl Default for Settings {
         Self {
             schema_version: 1,
             gateway_access_token: String::new(),
+            translation_mode: TranslationMode::default(),
         }
     }
 }
@@ -28,6 +41,7 @@ impl Default for Settings {
 pub struct SettingsView {
     pub schema_version: u32,
     pub gateway_access_configured: bool,
+    pub translation_mode: TranslationMode,
 }
 
 impl From<&Settings> for SettingsView {
@@ -35,6 +49,7 @@ impl From<&Settings> for SettingsView {
         Self {
             schema_version: settings.schema_version,
             gateway_access_configured: !settings.gateway_access_token.is_empty(),
+            translation_mode: settings.translation_mode,
         }
     }
 }

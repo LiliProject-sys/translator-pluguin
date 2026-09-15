@@ -9,6 +9,7 @@ use orange_translator_desktop_lib::{
 fn target(context: ContextCaptureSnapshot) -> LatestGatewayTarget {
     LatestGatewayTarget {
         target: "measurement".into(),
+        binding: None,
         request_type: RequestType::WordAnalysis,
         page_title: "Notepad".into(),
         source_app: "Notepad".into(),
@@ -16,6 +17,7 @@ fn target(context: ContextCaptureSnapshot) -> LatestGatewayTarget {
         translation_generation: 5,
         captured_at_unix_ms: 6,
         context,
+        translation_mode: orange_translator_desktop_lib::settings::TranslationMode::Precise,
     }
 }
 

@@ -1,5 +1,20 @@
 # Orange翻译
 
+## Windows Desktop
+
+`desktop/` 是独立 Windows 桌面端，采用 AGPL-3.0-only，包含 WPS PDF 辅助程序。
+参见 [许可范围](desktop/LICENSING.md) 和 [构建说明](desktop/BUILDING.md)。
+此声明不改变下方浏览器扩展或 `gateway/` 的原许可、版本和仓库可见性。
+
+桌面端已有本地基础词典与 Model Quick 回退、按需语境 Detail、三档模型模式、
+生词本、用户释义编辑，以及鼠标附近浮窗。WPS PDF 支持已验收的单选区单词、
+连字符词定位；不承诺通用多词、整句、整段或多 Range 选区。WPS Writer 仍走
+通用捕获路径，不宣称已取得其精确文档上下文。扫描 PDF/OCR 不在本轮范围内。
+
+Portable 需要 Windows x64、用户安装的 WPS（仅 WPS 功能）和 WebView2 Runtime。
+必须解压整个目录，不能只复制 EXE。随包运行环境方案及验证状态以本次交付报告为准。
+分发二进制时须同时提供匹配源码包与许可文件；不得带入访问码、密钥和个人数据。
+
 ## GitHub 私有 Beta 分发说明
 
 当前项目可作为私有 GitHub 仓库中的 Beta 测试版本分发，推荐先通过压缩包或私有仓库邀请少量用户试用。此项目尚未提交 Chrome Web Store 审核，也未提供生产级密钥保护、账号系统或云端同步。

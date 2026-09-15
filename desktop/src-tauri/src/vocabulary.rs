@@ -335,9 +335,6 @@ pub fn validate_source_url(url: &str) -> bool {
 fn validate_candidate(candidate: &VocabularyCandidate) -> Result<(), VocabularyError> {
     for (name, value) in [
         ("word", &candidate.word),
-        ("lemma", &candidate.lemma),
-        ("phonetic", &candidate.phonetic),
-        ("partOfSpeech", &candidate.part_of_speech),
         ("meaning", &candidate.meaning),
     ] {
         if value.trim().is_empty() {
@@ -381,9 +378,6 @@ fn validate_entry(entry: &VocabularyEntry) -> Result<(), String> {
     }
     for (name, value) in [
         ("word", &entry.word),
-        ("lemma", &entry.lemma),
-        ("phonetic", &entry.phonetic),
-        ("partOfSpeech", &entry.part_of_speech),
         ("meaning", &entry.meaning),
     ] {
         if value.trim().is_empty() {

@@ -4,7 +4,7 @@ mod win32;
 use crate::app_state::{
     target_preview, AppState, CandidateType, ClipboardRestoreState, DiagnosticEvent,
     DiagnosticResult, DiagnosticStage, LatestGatewayTarget, PopupAckState, PopupAttemptState,
-    RequestType, SelectionSnapshot,
+    RequestType,
 };
 use serde::Serialize;
 use std::{
@@ -163,6 +163,8 @@ pub struct ForegroundWindow {
 
 #[derive(Debug, Clone)]
 struct CaptureCandidate {
+    capture_epoch: u64,
+    surface: Option<crate::host_adapter::surface::Surface>,
     generation: u64,
     foreground: ForegroundWindow,
     mouse_x: i32,
@@ -887,6 +889,8 @@ fn spawn_gesture_thread(
                     foreground.pid,
                 );
                 let candidate = CaptureCandidate {
+                    capture_epoch: app.state::<AppState>().capture_epoch(),
+                    surface: Some(crate::host_adapter::surface::probe()),
                     generation,
                     foreground,
                     mouse_x: gesture.x,
@@ -922,6 +926,67 @@ fn hide_popup_for_external_click(app: &AppHandle, event: RawMouseEvent) {
     }
 }
 
+// The common seam for a future translation coordinator; no host acquisition here.
+fn submit_selection_snapshot(
+    app: &AppHandle, candidate: &CaptureCandidate,
+    capture: crate::host_adapter::SelectionRuntimeState,
+    mut context: crate::app_state::ContextCaptureSnapshot,
+    restore_state: ClipboardRestoreState, omit_page_title: bool, current: bool,
+) {
+    let ready_at = Instant::now();
+    let input = crate::selection_bridge::build_translation_input(&capture, current);
+    let _ = crate::publish_external_capture_diagnostic(app, candidate.generation, |d| {
+        d.host_capture = Some(capture.clone());
+        d.clipboard_restore_state = restore_state;
+    });
+    let input = match input {
+        Ok(input) => input,
+        Err(reason) => {
+            let _ = crate::publish_external_capture_diagnostic(app, candidate.generation, |d| {
+                d.reason_code = reason.into();
+                d.quick_state = "blocked".into();
+                d.quick_reason = reason.into();
+            });
+            return;
+        }
+    };
+    context.context_sentence = input.context;
+    let state = app.state::<AppState>();
+    let translation_generation = state.next_translation_generation();
+    let request_type = classify_target(&input.target);
+    let target = LatestGatewayTarget {
+        binding: Some(crate::selection_bridge::QuickBinding {
+            snapshot: capture.snapshot.expect("eligible snapshot"),
+            mouse_x: candidate.mouse_x, mouse_y: candidate.mouse_y,
+            capture_epoch: candidate.capture_epoch, ready_at,
+        }),
+        target: input.target, request_type,
+        page_title: if omit_page_title { String::new() } else { candidate.foreground.title.clone() },
+        source_app: candidate.foreground.app_name.clone(),
+        capture_generation: candidate.generation, translation_generation,
+        captured_at_unix_ms: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+        context, translation_mode: state.translation_mode().unwrap_or_default(),
+    };
+    if crate::publish_latest_gateway_target(app, target.clone()).is_err() { return; }
+    let _ = crate::publish_external_capture_diagnostic(app, candidate.generation, |d| {
+        d.stage = DiagnosticStage::TargetCaptured;
+        d.result = DiagnosticResult::Success;
+        d.reason_code.clear();
+        d.target_preview = target_preview(&target.target);
+        d.target_length = target.target_length();
+        d.request_type = Some(request_type);
+        d.translation_generation = translation_generation;
+        d.quick_state = "queued".into();
+        d.quick_reason.clear();
+        d.quick_timing_ms.insert("snapshotToSubmit".into(), ready_at.elapsed().as_millis() as u64);
+        d.popup_ack_state = PopupAckState::NotExpected;
+        d.popup_show_state = PopupAttemptState::NotAttempted;
+        d.popup_emit_state = PopupAttemptState::NotAttempted;
+    });
+    #[cfg(not(test))]
+    crate::start_automatic_gateway_translation(app, target);
+}
+
 fn spawn_capture_worker(
     app: AppHandle,
     owner_hwnd: isize,
@@ -935,6 +1000,7 @@ fn spawn_capture_worker(
         .spawn(move || {
             let platform = Win32CapturePlatform::new(owner_hwnd);
             let mut dedupe = TargetDedupe::default();
+            let mut hosts = crate::host_adapter::HostAdapterRegistry::default();
             while !stopped.load(Ordering::SeqCst) {
                 let candidate = {
                     let mut pending = match slot.candidate.lock() {
@@ -966,6 +1032,7 @@ fn spawn_capture_worker(
                 );
                 let generation_is_current = || {
                     !stopped.load(Ordering::SeqCst)
+                        && app.state::<AppState>().capture_epoch() == candidate.capture_epoch
                         && capture_generation.load(Ordering::SeqCst) == candidate.generation
                         && app.state::<AppState>().is_auto_translate_enabled()
                 };
@@ -989,9 +1056,23 @@ fn spawn_capture_worker(
                     );
                     continue;
                 }
+                let surface = crate::host_adapter::surface::probe();
+                if !generation_is_current() { continue; }
+                if candidate.surface.as_ref().is_some_and(|s| s != &surface) {
+                    let _ = crate::publish_external_capture_diagnostic(&app, candidate.generation, |d| {
+                        d.host_capture = Some(crate::host_adapter::SelectionRuntimeState::empty(
+                            crate::host_adapter::CaptureStatus::Unstable, "surface_changed"));
+                        d.stage = DiagnosticStage::GateRejected;
+                        d.result = DiagnosticResult::Ignored;
+                        d.reason_code = "surface_changed".into();
+                    });
+                    continue;
+                }
+                let interaction_id = crate::host_adapter::interaction_id(candidate.generation);
                 let capture_is_current = || {
                     let foreground = platform.foreground().ok();
-                    capture_gate_allows(
+                    app.state::<AppState>().capture_epoch() == candidate.capture_epoch
+                        && crate::host_adapter::surface::probe() == surface && capture_gate_allows(
                         stopped.load(Ordering::SeqCst),
                         app.state::<AppState>().is_auto_translate_enabled(),
                         capture_generation.load(Ordering::SeqCst),
@@ -1000,7 +1081,45 @@ fn spawn_capture_worker(
                         std::process::id(),
                     )
                 };
-                let result = run_clipboard_transaction_observed(
+                if let Some(mut host_capture) = hosts.capture(&surface, &interaction_id) {
+                    if !generation_is_current() { continue; }
+                    if !capture_is_current() {
+                        host_capture = crate::host_adapter::SelectionRuntimeState::empty(
+                            crate::host_adapter::CaptureStatus::Unstable, "surface_changed");
+                    }
+                    let _ = crate::publish_external_capture_diagnostic(&app, candidate.generation, |diagnostic| {
+                        diagnostic.stage = if host_capture.status == crate::host_adapter::CaptureStatus::Ok {
+                            DiagnosticStage::TargetCaptured
+                        } else { DiagnosticStage::GateRejected };
+                        diagnostic.result = if host_capture.status == crate::host_adapter::CaptureStatus::Ok {
+                            DiagnosticResult::Success
+                        } else { DiagnosticResult::Ignored };
+                        diagnostic.reason_code = host_capture.reason.clone();
+                        diagnostic.target_length = host_capture.target().chars().count();
+                        diagnostic.target_preview = target_preview(host_capture.target());
+                        diagnostic.host_capture = Some(host_capture.clone());
+                    });
+                    let mut context = crate::app_state::ContextCaptureSnapshot::empty(crate::app_state::ContextStatus::Success);
+                    if let Some(snapshot) = &host_capture.snapshot {
+                        context.context_sentence = snapshot.context_text().into();
+                        context.context_preview = snapshot.context_text().into();
+                        context.context_length = snapshot.context_text().chars().count();
+                        context.source = crate::app_state::ContextSource::Snapshot;
+                        context.unit = crate::app_state::ContextUnit::Sentence;
+                    }
+                    if platform.modifiers_active() {
+                        let _ = crate::publish_external_capture_diagnostic(&app, candidate.generation, |d| {
+                            d.quick_state = "blocked".into();
+                            d.quick_reason = "modifier_pressed".into();
+                        });
+                        continue;
+                    }
+                    submit_selection_snapshot(&app, &candidate, host_capture, context,
+                        ClipboardRestoreState::NotNeeded, true, generation_is_current());
+                    // All WPS outcomes remain terminal: no Clipboard or UIA fallback.
+                    continue;
+                }
+                let result = crate::host_adapter::GenericWindowsAdapter::capture(|| run_clipboard_transaction_observed(
                     &platform,
                     capture_is_current,
                     CLIPBOARD_WAIT_BUDGET,
@@ -1021,7 +1140,7 @@ fn spawn_capture_worker(
                             },
                         );
                     },
-                );
+                ));
                 let restore_state = result.restore_state;
                 if result.restore_state == ClipboardRestoreState::Failed {
                     eprintln!(
@@ -1101,7 +1220,6 @@ fn spawn_capture_worker(
                     continue;
                 }
 
-                let request_type = classify_target(&target);
                 let context = uia_context.capture(
                     uia_context::ContextCaptureRequest {
                         foreground_hwnd: candidate.foreground.hwnd,
@@ -1110,7 +1228,7 @@ fn spawn_capture_worker(
                     },
                     uia_context::CONTEXT_WAIT,
                 );
-                if !context_capture_is_current(
+                if !capture_is_current() || !context_capture_is_current(
                     stopped.load(Ordering::SeqCst),
                     app.state::<AppState>().is_auto_translate_enabled(),
                     capture_generation.load(Ordering::SeqCst),
@@ -1118,58 +1236,10 @@ fn spawn_capture_worker(
                 ) {
                     continue;
                 }
-                let translation_generation = app.state::<AppState>().next_translation_generation();
-                let captured_at_unix_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                let snapshot = SelectionSnapshot {
-                    selection_id: format!("selection-{}", candidate.generation),
-                    capture_generation: candidate.generation,
-                    target_length: target.chars().count(),
-                    request_type,
-                    foreground_hwnd: format!("0x{:X}", candidate.foreground.hwnd as usize),
-                    foreground_pid: candidate.foreground.pid,
-                    page_title: candidate.foreground.title.clone(),
-                    mouse_x: candidate.mouse_x,
-                    mouse_y: candidate.mouse_y,
-                    captured_at_unix_ms,
-                };
-                let target_length = snapshot.target_length;
-                let request_type = snapshot.request_type;
-                let preview = target_preview(&target);
-                let gateway_target = LatestGatewayTarget {
-                    target,
-                    request_type,
-                    page_title: snapshot.page_title.clone(),
-                    source_app: candidate.foreground.app_name.clone(),
-                    capture_generation: snapshot.capture_generation,
-                    translation_generation,
-                    captured_at_unix_ms,
-                    context,
-                };
-                let _ = crate::publish_latest_gateway_target(&app, gateway_target.clone());
-                let _ = crate::publish_external_capture_diagnostic(
-                    &app,
-                    candidate.generation,
-                    |diagnostic| {
-                        diagnostic.stage = DiagnosticStage::TargetCaptured;
-                        diagnostic.result = DiagnosticResult::Success;
-                        diagnostic.reason_code.clear();
-                        diagnostic.target_preview = preview;
-                        diagnostic.target_length = target_length;
-                        diagnostic.request_type = Some(request_type);
-                        diagnostic.clipboard_restore_state = restore_state;
-                        diagnostic.translation_generation = translation_generation;
-                        diagnostic.popup_ack_state = PopupAckState::NotExpected;
-                        diagnostic.popup_show_state = PopupAttemptState::NotAttempted;
-                        diagnostic.popup_emit_state = PopupAttemptState::NotAttempted;
-                    },
-                );
-                #[cfg(not(test))]
-                crate::start_automatic_gateway_translation(&app, gateway_target);
-                #[cfg(test)]
-                let _ = gateway_target;
+                let generic_snapshot = crate::host_adapter::GenericWindowsAdapter::snapshot(
+                    interaction_id, &target, &context.context_sentence, &candidate.foreground.app_name);
+                submit_selection_snapshot(&app, &candidate, generic_snapshot, context, restore_state,
+                    false, generation_is_current());
             }
         })
         .map_err(|error| error.to_string())
@@ -1181,6 +1251,8 @@ mod internal_tests {
 
     fn candidate(generation: u64, hwnd: isize, pid: u32) -> CaptureCandidate {
         CaptureCandidate {
+            capture_epoch: 0,
+            surface: None,
             generation,
             foreground: ForegroundWindow {
                 hwnd,

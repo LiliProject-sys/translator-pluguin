@@ -1,6 +1,10 @@
 pub mod app_state;
+pub mod host_adapter;
 pub mod gateway;
+pub mod dictionary;
 pub mod selection;
+pub mod selection_bridge;
+pub mod popup_position;
 pub mod settings;
 mod tray;
 pub mod vocabulary;
@@ -18,7 +22,7 @@ use gateway::{
     LanguageRequest, ReqwestGatewayTransport,
 };
 use serde::Serialize;
-use settings::{SettingsRepository, SettingsView};
+use settings::{SettingsRepository, SettingsView, TranslationMode};
 use std::{
     thread,
     time::{Duration, Instant},
@@ -122,9 +126,23 @@ fn emit_live_loading(
     may_show: bool,
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
+    // Tauri getters may synchronously wait for the UI thread. Never hold commit across them.
+    let visible = app.get_webview_window("popup")
+        .is_some_and(|popup| popup.is_visible().unwrap_or(false));
+    let position = if may_show {
+        app.get_webview_window("popup").map(|popup| popup_position::prepare(&popup, target))
+    } else { None };
+    state.with_current_quick(target, || emit_live_loading_current(app, target, request_id, payload, may_show, visible, position))
+        .unwrap_or(Ok(()))
+}
+
+fn emit_live_loading_current(app: &tauri::AppHandle, target: &LatestGatewayTarget,
+    request_id: &str, payload: &LivePopupTranslationState, may_show: bool, visible: bool,
+    position: Option<popup_position::PreparedPosition>) -> Result<(), String> {
+    let state = app.state::<AppState>();
     let gate = || -> Result<LiveLoadingGate, String> {
         Ok(LiveLoadingGate {
-            generation_current: state.is_current_translation(target.translation_generation),
+            generation_current: state.is_current_quick(target),
             request_current: state.gateway_test_state()?.request_id.as_deref() == Some(request_id),
             auto_translate_enabled: state.is_auto_translate_enabled(),
         })
@@ -136,9 +154,16 @@ fn emit_live_loading(
         .get_webview_window("popup")
         .ok_or_else(|| "popup window is unavailable".to_owned())?;
     if may_show {
-        let _ = popup.center();
+        if let Some(position) = position {
+            let diagnostic = popup_position::apply(&popup, position);
+            let _ = publish_external_capture_diagnostic(app, target.capture_generation, |d| {
+                d.popup_position = Some(diagnostic);
+            });
+        } else {
+            let _ = popup.center();
+        }
         popup.show().map_err(|error| error.to_string())?;
-    } else if !popup.is_visible().unwrap_or(false) {
+    } else if !visible {
         return Ok(());
     }
     let after_show = gate()?;
@@ -160,13 +185,18 @@ fn emit_live_result_if_current(
     payload: &LivePopupTranslationState,
 ) -> Result<bool, String> {
     let state = app.state::<AppState>();
+    let visible = app.get_webview_window("popup")
+        .is_some_and(|popup| popup.is_visible().unwrap_or(false));
+    state.with_current_quick(target, || emit_live_result_current(app, target, request_id, payload, visible))
+        .unwrap_or(Ok(false))
+}
+
+fn emit_live_result_current(app: &tauri::AppHandle, target: &LatestGatewayTarget,
+    request_id: &str, payload: &LivePopupTranslationState, visible: bool) -> Result<bool, String> {
+    let state = app.state::<AppState>();
     let request_current = state.gateway_test_state()?.request_id.as_deref() == Some(request_id);
-    let Some(popup) = app.get_webview_window("popup") else {
-        return Ok(false);
-    };
-    let visible = popup.is_visible().unwrap_or(false);
     let gate = LivePopupCommitGate {
-        generation_current: state.is_current_translation(target.translation_generation),
+        generation_current: state.is_current_quick(target),
         request_current,
         auto_translate_enabled: state.is_auto_translate_enabled(),
         popup_visible: visible,
@@ -208,9 +238,12 @@ fn emit_detail_if_current(
     if !should_emit_live_detail(gate()) {
         return Ok(false);
     }
-    app.emit_to("popup", POPUP_DETAIL_STATE, payload)
-        .map_err(|error| error.to_string())?;
-    Ok(true)
+    // Visibility is queried above, outside the commit lock. Never reopen/reposition here.
+    state.with_current_live_detail(generation, quick_request_id, detail_request_id, || {
+        app.emit_to("popup", POPUP_DETAIL_STATE, payload)
+            .map(|_| true)
+            .map_err(|error| error.to_string())
+    }).unwrap_or(Ok(false))
 }
 
 fn local_gateway_failure(code: &str, message: &str) -> GatewayFailure {
@@ -242,10 +275,11 @@ pub(crate) fn classify_live_popup_failure(failure: &GatewayFailure) -> LivePopup
 async fn perform_gateway_request(
     token: String,
     request: LanguageRequest,
+    observe_parse_ms: impl FnOnce(u64) + Send + 'static,
 ) -> Result<(u16, app_state::GatewayParsedResult), GatewayFailure> {
     tauri::async_runtime::spawn_blocking(move || {
         let transport = ReqwestGatewayTransport::new()?;
-        GatewayClient::new(transport).send_language(&token, &request)
+        GatewayClient::new(transport).send_language_observed(&token, &request, observe_parse_ms)
     })
     .await
     .map_err(|_| local_gateway_failure("network_error", "Gateway 请求任务失败"))?
@@ -291,6 +325,13 @@ async fn run_claimed_live_detail(
             local_gateway_failure("access_not_configured", "请先验证并保存访问码"),
         ),
         (Ok(request), Ok(settings)) => {
+            if !state.is_current_live_detail(
+                claim.target.translation_generation,
+                &claim.quick_request_id,
+                &claim.detail_request_id,
+            ) {
+                return Ok(());
+            }
             perform_gateway_detail_request(settings.gateway_access_token, request).await
         }
     };
@@ -319,6 +360,9 @@ async fn run_gateway_translation(
 ) -> Result<GatewayTestState, String> {
     let state = app.state::<AppState>();
     let claim = if presentation == GatewayPresentation::MainOnly {
+        if target.binding.is_some() && !state.is_current_quick(&target) {
+            return Err("stale_snapshot".into());
+        }
         let request_id = state.next_gateway_request_id();
         let sending = state.update_gateway_test_state(|gateway| {
             gateway.connection_state = GatewayConnectionState::Sending;
@@ -360,6 +404,14 @@ async fn run_claimed_gateway_translation(
         request_id,
         gateway_state: sending,
     } = claim;
+    if presentation.is_live() && !state.is_current_quick(&target) { return state.gateway_test_state(); }
+    let _ = publish_external_capture_diagnostic(&app, target.capture_generation, |d| {
+        d.quick_state = "loading".into();
+        d.quick_reason.clear();
+        if let Some(binding) = &target.binding {
+            d.quick_timing_ms.insert("snapshotToQuickBegin".into(), binding.ready_at.elapsed().as_millis() as u64);
+        }
+    });
     let _ = app.emit_to("main", GATEWAY_TARGET_CHANGED, sending);
 
     if presentation.is_live() {
@@ -373,11 +425,30 @@ async fn run_claimed_gateway_translation(
         );
     }
 
+    let dictionary = app.try_state::<std::sync::Arc<dictionary::DictionaryService>>()
+        .map(|service| service.inner().clone());
+    let local = if presentation.is_live() && target.request_type == app_state::RequestType::WordAnalysis {
+        if let Some(service) = dictionary.clone() {
+            let surface = target.target.clone();
+            tauri::async_runtime::spawn_blocking(move || service.resolve(&surface)).await.ok()
+        } else { None }
+    } else { None };
+    if presentation.is_live() && !state.is_current_quick(&target) { return state.gateway_test_state(); }
+    let local_hit = local.as_ref().is_some_and(|r| r.entry.is_some());
+    if let Some(resolution) = &local {
+        let _ = publish_external_capture_diagnostic(&app, target.capture_generation, |d| {
+            d.local_dictionary = Some(resolution.diagnostic.clone());
+        });
+    }
+    let started = Instant::now();
+    let outcome = if let Some(resolution) = local.as_ref().filter(|r| r.entry.is_some()) {
+        Ok((None, resolution.entry.as_ref().unwrap().display(&target.target,
+            &resolution.diagnostic.quick_source, &resolution.diagnostic.dictionary_version)))
+    } else {
     let request = build_language_request(&target, request_id.clone());
     let settings = state
         .settings_repository()
         .and_then(|repository| repository.load().map_err(|error| error.to_string()));
-    let started = Instant::now();
     let outcome = match (request, settings) {
         (Err(failure), _) => Err(failure),
         (_, Err(_)) => Err(local_gateway_failure(
@@ -388,23 +459,36 @@ async fn run_claimed_gateway_translation(
             local_gateway_failure("access_not_configured", "请先验证并保存访问码"),
         ),
         (Ok(request), Ok(settings)) => {
-            perform_gateway_request(settings.gateway_access_token, request).await
+            let parse_app = app.clone();
+            let capture_generation = target.capture_generation;
+            perform_gateway_request(settings.gateway_access_token, request, move |ms| {
+                let _ = publish_external_capture_diagnostic(&parse_app, capture_generation, |d| {
+                    d.quick_timing_ms.insert("quickParseData".into(), ms);
+                });
+            }).await
         }
     };
-    let latency_ms = started.elapsed().as_millis() as u64;
+    outcome.map(|(status, display)| (Some(status), display))
+    };
+    let latency_ms = if local_hit { local.as_ref().unwrap().diagnostic.lookup_latency_us / 1000 }
+                     else { started.elapsed().as_millis() as u64 };
+    if !local_hit && presentation.is_live() {
+        if let (Some(service), Ok((_, display))) = (dictionary, &outcome) {
+            let surface = target.target.clone();
+            let display = display.clone();
+            let profile = format!("{:?}", target.translation_mode);
+            let cached = tauri::async_runtime::spawn_blocking(move || service.cache_network_result(&surface, &display, &profile)).await;
+            if !matches!(cached, Ok(Ok(()))) {
+                let _ = publish_external_capture_diagnostic(&app, target.capture_generation, |d| {
+                    if let Some(local) = &mut d.local_dictionary {local.errors.push("cache_write_failed".into());}
+                });
+            }
+        }
+    }
 
     let apply_outcome = |gateway: &mut GatewayTestState| match &outcome {
         Ok((http_status, parsed)) => {
-            gateway.connection_state = GatewayConnectionState::Success;
-            gateway.http_status = Some(*http_status);
-            gateway.latency_ms = Some(latency_ms);
-            gateway.parse_status = GatewayParseStatus::Success;
-            gateway.parsed_result = Some(parsed.clone());
-            gateway.raw_preview = None;
-            gateway.error_code = None;
-            gateway.gateway_error_code = None;
-            gateway.error_message = None;
-            gateway.live_error_kind = None;
+            dictionary::apply_quick_success(gateway, parsed, *http_status, latency_ms);
         }
         Err(failure) => {
             gateway.connection_state = GatewayConnectionState::Failed;
@@ -438,6 +522,11 @@ async fn run_claimed_gateway_translation(
     let Some(final_state) = final_state else {
         return state.gateway_test_state();
     };
+    let _ = publish_external_capture_diagnostic(&app, target.capture_generation, |d| {
+        d.quick_state = if outcome.is_ok() { "success" } else { "error" }.into();
+        d.quick_reason = outcome.as_ref().err().map(|e| e.error_code.clone()).unwrap_or_default();
+        d.quick_timing_ms.insert(if local_hit { "localLookup" } else { "gatewayIncludingParse" }.into(), latency_ms);
+    });
     if presentation.is_live()
         && matches!(
             &outcome,
@@ -446,7 +535,7 @@ async fn run_claimed_gateway_translation(
     {
         let _ = state.prepare_live_detail(&target, &request_id);
     }
-    if !presentation.is_live() || state.is_current_translation(target.translation_generation) {
+    if !presentation.is_live() || state.is_current_quick(&target) {
         let _ = app.emit_to("main", GATEWAY_TARGET_CHANGED, final_state.clone());
     }
     if presentation.is_live() {
@@ -460,7 +549,15 @@ async fn run_claimed_gateway_translation(
                 classify_live_popup_failure(failure),
             ),
         };
-        let _ = emit_live_result_if_current(&app, &target, &request_id, &payload);
+        let publish_started = Instant::now();
+        if emit_live_result_if_current(&app, &target, &request_id, &payload).unwrap_or(false) {
+            let _ = publish_external_capture_diagnostic(&app, target.capture_generation, |d| {
+                d.quick_timing_ms.insert("popupPublish".into(), publish_started.elapsed().as_millis() as u64);
+                if let Some(binding) = &target.binding {
+                    d.quick_timing_ms.insert("snapshotToPopupResult".into(), binding.ready_at.elapsed().as_millis() as u64);
+                }
+            });
+        }
     }
     Ok(final_state)
 }
@@ -603,6 +700,8 @@ pub(crate) fn publish_new_external_capture(
         foreground_title,
         foreground_pid,
     )?;
+    // The candidate may be filtered without ever producing a new Quick payload.
+    let _ = app.emit_to("popup", "popup-selection-invalidated", capture_generation);
     app.emit_to("main", TARGET_CAPTURE_DIAGNOSTIC, diagnostic.clone())
         .map_err(|error| error.to_string())?;
     Ok(diagnostic)
@@ -802,6 +901,21 @@ fn get_settings(state: State<'_, AppState>) -> Result<SettingsView, String> {
 }
 
 #[tauri::command]
+fn set_translation_mode(
+    state: State<'_, AppState>,
+    mode: TranslationMode,
+) -> Result<SettingsView, String> {
+    let repository = state.settings_repository()?;
+    let mut settings = repository.load().map_err(|error| error.to_string())?;
+    settings.translation_mode = mode;
+    repository
+        .save(&settings)
+        .map_err(|error| error.to_string())?;
+    state.set_translation_mode(mode)?;
+    Ok(SettingsView::from(&settings))
+}
+
+#[tauri::command]
 fn get_gateway_test_state(state: State<'_, AppState>) -> Result<GatewayTestState, String> {
     state.gateway_test_state()
 }
@@ -931,6 +1045,39 @@ fn list_vocabulary(
 }
 
 #[tauri::command]
+async fn get_current_override(app: tauri::AppHandle, generation: u64, quick_request_id: String) -> Result<app_state::OverrideEditorView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AppState>().begin_override_edit(generation, &quick_request_id,
+            &app.state::<std::sync::Arc<dictionary::DictionaryService>>())
+    }).await.map_err(|_| "个人词典读取失败".to_string())?
+}
+
+#[tauri::command]
+async fn save_current_override(app: tauri::AppHandle, generation: u64, quick_request_id: String,
+    session_id: u64, fields: dictionary::LocalDictionaryEntry) -> Result<Option<app_state::PopupTranslationResult>, String> {
+    commit_current_override(app, generation, quick_request_id, session_id, Some(fields)).await
+}
+
+#[tauri::command]
+async fn remove_current_override(app: tauri::AppHandle, generation: u64, quick_request_id: String,
+    session_id: u64) -> Result<Option<app_state::PopupTranslationResult>, String> {
+    commit_current_override(app, generation, quick_request_id, session_id, None).await
+}
+
+async fn commit_current_override(app: tauri::AppHandle, generation: u64, quick_request_id: String,
+    session_id: u64, fields: Option<dictionary::LocalDictionaryEntry>) -> Result<Option<app_state::PopupTranslationResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = app.state::<AppState>().commit_override_edit(generation, &quick_request_id, session_id,
+            &app.state::<std::sync::Arc<dictionary::DictionaryService>>(), fields)?;
+        // Diagnostics only: do not emit/reposition the normal Popup or reset Detail.
+        if let Ok(state) = app.state::<AppState>().gateway_test_state() {
+            let _ = app.emit_to("main", GATEWAY_TARGET_CHANGED, state);
+        }
+        Ok(result)
+    }).await.map_err(|_| "个人词典操作失败".to_string())?
+}
+
+#[tauri::command]
 fn save_current_word_to_vocabulary(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -1043,6 +1190,9 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            get_current_override,
+            save_current_override,
+            remove_current_override,
             get_runtime_state,
             get_target_capture_diagnostic,
             read_current_clipboard_unicode,
@@ -1053,6 +1203,7 @@ pub fn run() {
             hide_popup,
             open_main_section,
             get_settings,
+            set_translation_mode,
             get_gateway_test_state,
             verify_and_save_access_code,
             send_latest_target_to_gateway,
@@ -1068,9 +1219,17 @@ pub fn run() {
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
+            let base_path = app.path().resource_dir()?.join("dictionary/orange_dictionary.db");
+            app.manage(std::sync::Arc::new(dictionary::DictionaryService::new(
+                base_path, app_data_dir.join("orange_user_lexicon.db"))));
             let settings_path = app_data_dir.join("settings.json");
+            let settings_repository = SettingsRepository::new(settings_path);
+            let initial_settings = settings_repository.load().unwrap_or_default();
             app.state::<AppState>()
-                .set_settings_repository(SettingsRepository::new(settings_path))
+                .set_translation_mode(initial_settings.translation_mode)
+                .map_err(|message| tauri::Error::Io(std::io::Error::other(message)))?;
+            app.state::<AppState>()
+                .set_settings_repository(settings_repository)
                 .map_err(|message| tauri::Error::Io(std::io::Error::other(message)))?;
             app.state::<AppState>()
                 .set_vocabulary_repository(VocabularyRepository::new(
@@ -1301,6 +1460,7 @@ mod stage3b_popup_tests {
     fn target(request_type: RequestType) -> LatestGatewayTarget {
         LatestGatewayTarget {
             target: "measurement".into(),
+            binding: None,
             request_type,
             page_title: "Notepad".into(),
             source_app: "Notepad".into(),
@@ -1308,6 +1468,7 @@ mod stage3b_popup_tests {
             translation_generation: 8,
             captured_at_unix_ms: 9,
             context: ContextCaptureSnapshot::empty(ContextStatus::Unsupported),
+            translation_mode: crate::settings::TranslationMode::Precise,
         }
     }
 

@@ -2,6 +2,7 @@ import asyncio
 import json
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -26,12 +27,17 @@ class FakeGeminiClient:
     def __init__(self):
         self.calls = []
 
-    def generate_json(self, prompt, schema_model, request_id, max_output_tokens=None, telemetry=None):
+    def generate_json(
+        self, prompt, schema_model, request_id, max_output_tokens=None, telemetry=None,
+        thinking_type=None, reasoning_effort=None,
+    ):
         self.calls.append({
             "prompt": prompt,
             "schema_model": schema_model,
             "request_id": request_id,
             "max_output_tokens": max_output_tokens,
+            "thinking_type": thinking_type,
+            "reasoning_effort": reasoning_effort,
         })
         if schema_model.__name__ == "WordQuickAnalysis":
             return {
@@ -115,11 +121,43 @@ class GatewayContractTests(unittest.TestCase):
         self.assertNotIn("cached", response["data"])
         self.assertEqual(self.fake_gemini.calls[0]["max_output_tokens"], 256)
 
+    def test_product_mode_routes_inside_gateway_and_legacy_defaults_to_precise(self):
+        precise = FakeGeminiClient()
+        fast = FakeDeepSeekClient()
+
+        def resolve(mode):
+            return fast if mode == "fast" else precise
+
+        with patch("gateway.app.main.get_upstream_client_for_mode", side_effect=resolve) as resolver:
+            endpoint = route_endpoint(create_app(), "/v1/language", "POST")
+            base = {
+                "requestType": "wordAnalysis",
+                "analysisMode": "quick",
+                "text": "employed",
+            }
+            legacy = LanguageRequest.model_validate({**base, "requestId": "legacy"})
+            explicit_precise = LanguageRequest.model_validate(
+                {**base, "requestId": "precise", "mode": "precise"}
+            )
+            explicit_fast = LanguageRequest.model_validate(
+                {**base, "requestId": "fast", "mode": "fast"}
+            )
+            legacy_response = asyncio.run(endpoint(legacy, "valid-token"))
+            precise_response = asyncio.run(endpoint(explicit_precise, "valid-token"))
+            fast_response = asyncio.run(endpoint(explicit_fast, "valid-token"))
+
+        self.assertEqual([call.args[0] for call in resolver.call_args_list], ["precise", "precise", "fast"])
+        self.assertEqual(legacy_response["data"]["upstreamProvider"], "gemini")
+        self.assertEqual(precise_response["data"]["upstreamProvider"], "gemini")
+        self.assertEqual(fast_response["data"]["upstreamProvider"], "deepseek")
+
     def test_language_uses_injected_deepseek_upstream_without_contract_changes(self):
-        app = create_app(FakeDeepSeekClient())
+        deepseek = FakeDeepSeekClient()
+        app = create_app(deepseek)
         language_endpoint = route_endpoint(app, "/v1/language", "POST")
         payload = LanguageRequest.model_validate({
             "requestId": "selection-deepseek-001",
+            "mode": "fast",
             "requestType": "wordAnalysis",
             "analysisMode": "detail",
             "text": "employed",
@@ -128,9 +166,20 @@ class GatewayContractTests(unittest.TestCase):
         response = asyncio.run(language_endpoint(payload, "valid-token"))
         self.assertEqual(response["data"]["provider"], "gateway")
         self.assertEqual(response["data"]["upstreamProvider"], "deepseek")
-        self.assertEqual(response["data"]["skillVersion"], "context-analysis-v6")
+        self.assertEqual(response["data"]["skillVersion"], "deepseek-v4-flash-context-v12")
+        self.assertIsNone(deepseek.calls[0]["max_output_tokens"])
+        self.assertEqual(deepseek.calls[0]["thinking_type"], "enabled")
+        self.assertEqual(deepseek.calls[0]["reasoning_effort"], "max")
 
     def test_language_rejects_invalid_combination_and_unknown_fields(self):
+        self.assertEqual(LanguageRequest.model_validate({
+            "requestId": "legacy", "requestType": "wordAnalysis", "analysisMode": "quick", "text": "word"
+        }).mode, "precise")
+        with self.assertRaises(ValidationError):
+            LanguageRequest.model_validate({
+                "requestId": "bad-mode", "requestType": "wordAnalysis", "analysisMode": "quick",
+                "text": "word", "mode": "deepseek",
+            })
         with self.assertRaises(ValidationError):
             LanguageRequest.model_validate({
                 "requestId": "selection-bad",

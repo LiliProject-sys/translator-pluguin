@@ -31,6 +31,29 @@ export interface SystemEventDiagnostic {
 }
 
 export interface ExternalCaptureDiagnostic {
+  popupPosition: {
+    positionMode: string;
+    fallbackReason: string | null;
+    anchor: { x: number; y: number } | null;
+    finalPosition: { x: number; y: number } | null;
+    placementDirection: string | null;
+    workArea: { x: number; y: number; width: number; height: number } | null;
+    popupSize: { width: number; height: number } | null;
+    offsetPx: number | null;
+    clamped: boolean;
+    oversized: boolean;
+    submissionSucceeded: boolean;
+    timingUs: Record<string, number>;
+  } | null;
+  quickState: string;
+  quickReason: string;
+  quickTimingMs: Record<string, number>;
+  localDictionary?: {
+    quickSource: string; lookupSurface: string; candidateCount: number;
+    dictionaryVersion: string; lookupLatencyUs: number; ambiguityMerged: boolean;
+    modelFallback: boolean; generatedCacheEnabled: boolean; errors: string[];
+  } | null;
+  hostCapture: SelectionRuntimeState | null;
   candidateType?: CandidateType;
   stage: DiagnosticStage;
   result: DiagnosticResult;
@@ -53,6 +76,23 @@ export interface ExternalCaptureDiagnostic {
 export interface TargetDiagnostics {
   systemEvent: SystemEventDiagnostic;
   externalCapture: ExternalCaptureDiagnostic | null;
+}
+
+// Captured facts only. Translation results never mutate this value.
+export interface HostSelectionSnapshot {
+  readonly snapshotId: string;
+  readonly capturedAt: string;
+  readonly host: { readonly adapterId: string; readonly appKind: string };
+  readonly target: { readonly text: string };
+  readonly document: { readonly documentId: string; readonly title: string | null };
+  readonly occurrence: Readonly<{ kind: "wps-pdf-range"; pageIndex: number; startIndex: number; endIndex: number } | { kind: "unavailable" }>;
+  readonly context: { readonly text: string; readonly source: string; readonly quality: string };
+}
+export interface SelectionRuntimeState {
+  status: "OK" | "NOT_APPLICABLE" | "INDETERMINATE" | "NO_SELECTION" | "UNSTABLE" | "ERROR";
+  snapshot: HostSelectionSnapshot | null;
+  reason: string;
+  timingMs: Record<string, number>;
 }
 
 export type ClipboardFormatAvailability = "yes" | "no" | "error";
@@ -98,7 +138,10 @@ export interface SelectionSnapshot {
 export interface SettingsView {
   schemaVersion: number;
   gatewayAccessConfigured: boolean;
+  translationMode: TranslationMode;
 }
+
+export type TranslationMode = "ultra_fast" | "fast" | "precise";
 
 export interface LatestGatewayTarget {
   target: string;
@@ -110,11 +153,12 @@ export interface LatestGatewayTarget {
   capturedAtUnixMs: number;
   context: {
     status: "success" | "unsupported" | "noSelection" | "mismatch" | "timeout" | "error";
-    source: "uia" | "empty";
-    unit: "paragraph" | "line" | "none";
+    source: "uia" | "empty" | "snapshot";
+    unit: "paragraph" | "line" | "none" | "sentence";
     contextLength: number;
     contextPreview: string;
   };
+  translationMode: TranslationMode;
 }
 
 export interface GatewayKeyTerm {
@@ -198,6 +242,20 @@ export interface MockTranslationState {
   captureDiagnostic: boolean;
   target?: string;
   selection?: SelectionSnapshot;
+}
+
+export interface LocalOverrideFields {
+  lemma: string;
+  phonetic: string;
+  partOfSpeech: string;
+  meaning: string;
+}
+
+export interface OverrideEditorView {
+  sessionId: number;
+  target: string;
+  fields: LocalOverrideFields;
+  hasOverride: boolean;
 }
 
 export type PopupTranslationResult =
@@ -323,5 +381,6 @@ export const EVENTS = {
   gatewayTargetChanged: "gateway-target-changed",
   popupTranslationState: "popup-translation-state",
   popupDetailState: "popup-detail-state",
+  popupSelectionInvalidated: "popup-selection-invalidated",
   vocabularyChanged: "vocabulary-changed",
 } as const;
