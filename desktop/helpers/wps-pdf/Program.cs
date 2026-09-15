@@ -161,6 +161,14 @@ static class Program {
  [STAThread] static int Main(string[] args) {
   Console.InputEncoding=new UTF8Encoding(false);Console.OutputEncoding=new UTF8Encoding(false);
   if(args.SequenceEqual(new[]{"--self-test"})){try{SelfTest();}finally{StopPython();}return 0;}
+  if(args.Length==2&&args[0]=="--self-test-resolver") {
+   try {
+    var sample=new Sample(Path.GetFullPath(args[1]),"synthetic-v1","public.pdf","component",0,5,13,"This component is useful.",5,true);
+    var result=Resolve(sample,HelperRoot());
+    if(result.source!="pymupdf-sentence"||result.quality!="exact"||result.text!="This component is useful.")return 1;
+    Console.WriteLine("Bundled helper-to-Python synthetic resolution passed.");return 0;
+   }finally{StopPython();}
+  }
   if(args.Length==2&&args[0]=="--test-transport") {
    Console.ReadLine();if(args[1]=="malformed")Console.WriteLine("not-json");return 0;
   }

@@ -28,4 +28,6 @@ with tempfile.TemporaryDirectory(prefix='orange-portable-public-') as temp:
     assert data['ok'] and data['text'] == 'This component is useful.', 'Bundled PDF resolution failed'
     subprocess.run([str(runtime), str(root/'WpsPdfHelper.dll'), '--self-test'],
                    env=env, cwd=temp, check=True, timeout=15)
+    subprocess.run([str(runtime), str(root/'WpsPdfHelper.dll'), '--self-test-resolver', str(pdf)],
+                   env=env, cwd=temp, check=True, timeout=15)
 print('Relocated helper and synthetic PDF resolution passed with empty PATH and poisoned external Python paths.')

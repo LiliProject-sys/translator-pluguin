@@ -84,7 +84,7 @@ for root in [binary, source]:
             records.append(dict(path=path.relative_to(root).as_posix(), size=path.stat().st_size,
                                 sha256=sha256(path)))
     (root/'FILE-MANIFEST.json').write_text(json.dumps(dict(revision=revision,files=records),ensure_ascii=False,indent=2),encoding='utf-8')
-    with zipfile.ZipFile(out/(root.name+'.zip'), 'x', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+    with zipfile.ZipFile(out/(root.name+'.zip'), 'x', zipfile.ZIP_DEFLATED, compresslevel=6, strict_timestamps=False) as z:
         for path in sorted(root.rglob('*')):
             if path.is_file(): z.write(path, root.name+'/'+path.relative_to(root).as_posix())
 print('Binary and matching source archives generated; audit before sharing.')

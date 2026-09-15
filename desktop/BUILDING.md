@@ -40,7 +40,7 @@ Verification (no paid API calls):
 cd desktop/src-tauri
 cargo test --offline
 cargo test --offline --test local_dictionary_real -- --ignored
-cd ../..
+cd ..
 npm run build
 node --test tests/popup-editor.test.cjs
 ```
